@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SkinAI Classifier — Research</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/styles.css" />
+</head>
+<body>
+  
+    <header class="site-header" role="banner">
+      <div class="container header-inner">
+        <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
+          <div class="brand-mark" aria-hidden="true">AI</div>
+          <div class="brand-text">
+            <strong>SkinAI Classifier</strong>
+            <span>Purdue University</span>
+          </div>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html" class="nav-link ">Home</a>
+          <a href="upload.html" class="nav-link ">Upload</a>
+          <a href="research.html" class="nav-link active">Research</a>
+          <a href="team.html" class="nav-link ">Team</a>
+        </nav>
+      </div>
+    </header>
+    
+  
+<main class="container narrow">
+  <section class="section-pad" aria-labelledby="res-title">
+    <h1 id="res-title" class="h-title">Research</h1>
+    <p class="muted">Overview of our model architecture, dataset, and evaluation.</p>
+    <div class="card">
+      <h2>Overview</h2>
+      <ul>
+        <li><strong>Model:</strong> ResNet/EfficientNet variants with Grad-CAM for interpretability</li>
+        <li><strong>Dataset:</strong> Public dermoscopic datasets (e.g., HAM10000)</li>
+        <li><strong>Metrics:</strong> Accuracy, Precision/Recall, AUC</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="container">
+      <p class="footnote">© <span id="year"></span> SkinAI Classifier · Senior Capstone Project · For demonstration only.</p>
+    </div>
+  </footer>
+  <script src="scripts/app.js"></script>
+</body>
+</html>
