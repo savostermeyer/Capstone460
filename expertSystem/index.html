@@ -1,3 +1,69 @@
+<!-- demo html -->
 
 
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><title>Skin Lesion Expert System</title>
+</head>
+<body>
+  <h2>Upload an image & answer pre-screening</h2>
+  <form id="f">
+    <input type="file" name="image" accept="image/*" required><br><br>
 
+    Sex:
+    <select name="sex">
+      <option value="">(any)</option>
+      <option value="male">Male</option>
+      <option value="female">Female</option>
+      <option value="unknown">Unknown</option>
+    </select><br><br>
+
+    Age: <input type="number" name="age" min="0" max="120" style="width:90px;"><br><br>
+
+    Localization:
+    <select name="localization">
+      <option value="">(any)</option>
+      <option value="back">Back</option>
+      <option value="lower extremity">Lower Extremity</option>
+      <option value="trunk">Trunk</option>
+      <option value="upper extremity">Upper Extremity</option>
+      <option value="abdomen">Abdomen</option>
+    </select><br><br>
+
+    ABCDE / flags:
+    <label><input type="checkbox" name="asymmetry"> Asymmetry</label>
+    <label><input type="checkbox" name="border_irregular"> Border irregular</label>
+    <label><input type="checkbox" name="color_variegated"> Color varied</label>
+    <label><input type="checkbox" name="evolving_change"> Evolving</label><br><br>
+
+    Diameter (mm): <input type="number" name="diameter_mm" min="0" style="width:90px;"><br><br>
+    <label><input type="checkbox" name="bleeding_ulceration"> Bleeding/ulceration</label>
+    <label><input type="checkbox" name="sun_exposure_high"> High sun exposure</label><br><br>
+
+    <button>Find similar cases</button>
+  </form>
+
+  <div id="out"></div>
+
+  <script>
+    const f = document.getElementById('f');
+    const out = document.getElementById('out');
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(f);
+      const r = await fetch('/query', { method:'POST', body: fd });
+      const j = await r.json();
+      if (j.error) { out.textContent = j.error; return; }
+      out.innerHTML = `<h3>Reasons</h3><ul>${
+        (j.reasons||[]).map(x=>`<li>${x}</li>`).join('')
+      }</ul><h3>Top matches</h3>` + (j.results||[]).map(r => `
+        <div style="margin:10px 0;">
+          <img src="${r.url}" width="220" height="220" style="object-fit:cover;border:1px solid #ddd">
+          <div>ID: ${r.image_id} | dx: <b>${r.dx}</b> | sim: ${r.similarity.toFixed(3)} | site: ${r.localization} | sex: ${r.sex} | age: ${r.age ?? ''}</div>
+        </div>
+      `).join('');
+    };
+  </script>
+</body>
+</html>
