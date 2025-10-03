@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SkinAI Classifier — Upload</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/styles.css" />
+</head>
+<body>
+  
+    <header class="site-header" role="banner">
+      <div class="container header-inner">
+        <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
+          <div class="brand-mark" aria-hidden="true">AI</div>
+          <div class="brand-text">
+            <strong>SkinAI Classifier</strong>
+            <span>Purdue University</span>
+          </div>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <a href="index.html" class="nav-link ">Home</a>
+          <a href="upload.html" class="nav-link active">Upload</a>
+          <a href="research.html" class="nav-link ">Research</a>
+          <a href="team.html" class="nav-link ">Team</a>
+        </nav>
+      </div>
+    </header>
+    
+  
+<main class="container narrow">
+  <section class="section-pad" aria-labelledby="upl-title">
+    <h1 id="upl-title" class="h-title">Upload</h1>
+    <p class="muted">Drag and drop a JPG/PNG or use the button below.</p>
+    <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Image upload dropzone">
+      <div class="dz-inner">
+        <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3l4 4h-3v6h-2V7H8zm-6 8v6h12v-6h2v8H4v-8z"/></svg>
+        <p class="dz-title">Drag & drop your image here</p>
+        <p class="dz-sub">or click to browse</p>
+        <label class="file-btn">
+          <input id="fileInput" type="file" accept="image/*"/>
+          <span>Choose File</span>
+        </label>
+      </div>
+    </div>
+    <div id="preview" class="preview" aria-live="polite"></div>
+  </section>
+</main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="container">
+      <p class="footnote">© <span id="year"></span> SkinAI Classifier · Senior Capstone Project · For demonstration only.</p>
+    </div>
+  </footer>
+  <script src="scripts/app.js"></script>
+</body>
+</html>
