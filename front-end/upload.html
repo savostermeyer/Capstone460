@@ -4,56 +4,318 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SkinAI Classifier — Upload</title>
+  <link rel="stylesheet" href="styles/styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles/styles.css" />
+  <style>
+    /* --- Additions to make the form “boxed” and airy --- */
+    .q-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+    .q-card{ background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px; box-shadow: var(--shadow); }
+    .q-label{ display:block; font-weight:700; margin-bottom:8px; }
+    .q-hint{ margin:6px 0 0; font-size:.85rem; color:var(--muted); }
+    .q-input,.q-select,.q-textarea{
+      width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2a2a2a; background:#0f0f0f; color:var(--text);
+    }
+    .q-textarea{ min-height:110px; resize:vertical; }
+    .section-sub{ margin:-6px 0 14px; color:var(--muted); }
+    .form-actions{
+      position:sticky; bottom:0; background: linear-gradient(180deg, rgba(10,10,10,.1), var(--bg));
+      padding:10px 0 0; margin-top: 6px; display:flex; gap:10px; align-items:center;
+    }
+    .pill{ display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid #2a2a2a; background:#111; margin: 2px 6px 0 0; font-size:.85rem; }
+    .result{ display:none; } .result.show{ display:block; }
+    .req{ color: var(--gold); margin-left: 4px; }
+    .dropzone{ outline-offset:4px; } .dropzone:focus{ outline:2px solid var(--gold); }
+  </style>
 </head>
 <body>
-  
-    <header class="site-header" role="banner">
-      <div class="container header-inner">
-        <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
-          <div class="brand-mark" aria-hidden="true">AI</div>
-          <div class="brand-text">
-            <strong>SkinAI Classifier</strong>
-            <span>Purdue University</span>
-          </div>
-        </a>
-        <nav class="nav" aria-label="Primary">
-          <a href="index.html" class="nav-link ">Home</a>
-          <a href="upload.html" class="nav-link active">Upload</a>
-          <a href="research.html" class="nav-link ">Research</a>
-          <a href="team.html" class="nav-link ">Team</a>
-        </nav>
-      </div>
-    </header>
-    
-  
-<main class="container narrow">
-  <section class="section-pad" aria-labelledby="upl-title">
-    <h1 id="upl-title" class="h-title">Upload</h1>
-    <p class="muted">Drag and drop a JPG/PNG or use the button below.</p>
-    <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Image upload dropzone">
-      <div class="dz-inner">
-        <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3l4 4h-3v6h-2V7H8zm-6 8v6h12v-6h2v8H4v-8z"/></svg>
-        <p class="dz-title">Drag & drop your image here</p>
-        <p class="dz-sub">or click to browse</p>
-        <label class="file-btn">
-          <input id="fileInput" type="file" accept="image/*"/>
-          <span>Choose File</span>
-        </label>
-      </div>
-    </div>
-    <div id="preview" class="preview" aria-live="polite"></div>
-  </section>
-</main>
+  <!-- Header -->
+  <header class="site-header" role="banner">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
+        <div class="brand-mark" aria-hidden="true">AI</div>
+        <div class="brand-text">
+          <strong>SkinAI Classifier</strong>
+          <span>Purdue University</span>
+        </div>
+      </a>
+    <nav class="nav" aria-label="Primary">
+  <a href="index.html" class="nav-link">Home</a>
+  <a href="upload.html" class="nav-link">Upload</a>
+  <a href="reports.html" class="nav-link">Reports</a>
+  <a href="team.html" class="nav-link">About Us</a>
+  <a href="login.html" class="nav-link">Login</a>
+</nav>
 
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="container narrow">
+    <section class="section-pad" aria-labelledby="upload-title">
+      <h1 id="upload-title" class="h-title">Upload</h1>
+      <p class="muted">Drag and drop a JPG/PNG and answer the questions below to get analysis results.</p>
+
+      <!-- Dropzone -->
+      <div id="dz" class="dropzone" tabindex="0" aria-label="Image upload area">
+        <div class="dz-inner">
+          <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
+          <p class="dz-title">Drag &amp; drop your image here</p>
+          <p class="dz-sub">or click to browse</p>
+          <label class="file-btn" for="fileInput">Choose File
+            <input id="fileInput" type="file" accept="image/jpeg,image/png" />
+          </label>
+          <p class="q-hint">Tip: one clear lesion per image, good lighting, no heavy filters.</p>
+        </div>
+      </div>
+
+      <!-- Preview -->
+      <div id="preview" class="preview" aria-live="polite" aria-atomic="true"></div>
+
+      <!-- Intake form -->
+      <form id="intakeForm" class="card" novalidate>
+        <h2 class="h-title" style="font-size:1.25rem; margin-top:0;">Patient Intake</h2>
+        <p class="section-sub">Required fields marked with <span class="req">*</span></p>
+
+        <div class="q-grid">
+          <div class="q-card">
+            <label class="q-label" for="name">Full Name <span class="req">*</span></label>
+            <input class="q-input" id="name" name="name" type="text" placeholder="e.g., Alex Johnson" required />
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="age">Age <span class="req">*</span></label>
+            <input class="q-input" id="age" name="age" type="number" min="0" max="120" placeholder="e.g., 28" required />
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="sex">Sex at Birth</label>
+            <select class="q-select" id="sex" name="sex">
+              <option value="">Prefer not to say</option>
+              <option>Female</option>
+              <option>Male</option>
+              <option>Intersex</option>
+            </select>
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="skinType">Skin Condition <span class="req">*</span></label>
+            <select class="q-select" id="skinType" name="skinType" required>
+              <option value="">Select...</option>
+              <!-- Keeping your existing options/IDs for now -->
+              <option value="I">I — Very fair, always burns, never tans</option>
+              <option value="II">II — Fair, usually burns, tans minimally</option>
+              <option value="III">III — Medium, sometimes mild burn, tans uniformly</option>
+              <option value="IV">IV — Olive, rarely burns, tans well</option>
+              <option value="V">V — Brown, very rarely burns, tans easily</option>
+              <option value="VI">VI — Dark brown/black, never burns</option>
+            </select>
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="location">Location <span class="req">*</span></label>
+            <input class="q-input" id="location" name="location" type="text" placeholder="e.g., Left forearm" required />
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="duration">Duration (days) <span class="req">*</span></label>
+            <input class="q-input" id="duration" name="duration" type="number" min="0" max="3650" placeholder="e.g., 14" required />
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="symptom">Primary Symptom</label>
+            <select class="q-select" id="symptom" name="symptom">
+              <option value="">Select...</option>
+              <option>Itching</option>
+              <option>Pain</option>
+              <option>Bleeding</option>
+              <option>Crusting</option>
+              <option>Rapid growth</option>
+              <option>Color change</option>
+            </select>
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="background">Family History (skin cancer / melanoma)</label>
+            <select class="q-select" id="background" name="background">
+              <option value="">Unknown / Prefer not to say</option>
+              <option>None</option>
+              <option>First-degree relative</option>
+              <option>Second-degree relative</option>
+            </select>
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="sunExp">Typical Sun Exposure</label>
+            <select class="q-select" id="sunExp" name="sunExp">
+              <option value="">Select...</option>
+              <option>Low (mostly indoors)</option>
+              <option>Moderate</option>
+              <option>High (outdoors daily)</option>
+            </select>
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="spf">Regular SPF Use</label>
+            <select class="q-select" id="spf" name="spf">
+              <option value="">Select...</option>
+              <option>Rarely/Never</option>
+              <option>Sometimes</option>
+              <option>Daily</option>
+            </select>
+          </div>
+
+          <div class="q-card">
+            <label class="q-label" for="meds">Current Medications</label>
+            <input class="q-input" id="meds" name="meds" type="text" placeholder="e.g., Isotretinoin" />
+          </div>
+
+          <div class="q-card" style="grid-column: 1 / -1;">
+            <label class="q-label" for="notes">Notes</label>
+            <textarea class="q-textarea" id="notes" name="notes" placeholder="Anything else we should know?"></textarea>
+          </div>
+
+          <div class="q-card" style="grid-column: 1 / -1;">
+            <label><input id="consent" type="checkbox" /> I confirm this image is mine or I have permission to upload it, and I consent to analysis. <span class="req">*</span></label>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button id="analyzeBtn" class="btn btn-cta" type="submit" disabled>Analyze</button>
+          <button id="clearBtn" class="btn btn-secondary" type="button">Clear</button>
+          <span id="formMsg" class="q-hint" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+
+      <!-- Results -->
+      <div id="resultCard" class="card result" aria-live="polite">
+        <h3 style="margin-top:0;">Preliminary Analysis (demo)</h3>
+        <p class="muted" id="resultMeta"></p>
+        <div id="resultTags" style="margin-top:6px;"></div>
+        <hr style="border-color:#2a2a2a;">
+        <p>This is a front-end demo summary. Hook this form up to your back-end/ML endpoint to return real predictions.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
   <footer class="site-footer" role="contentinfo">
     <div class="container">
       <p class="footnote">© <span id="year"></span> SkinAI Classifier · Senior Capstone Project · For demonstration only.</p>
     </div>
   </footer>
-  <script src="scripts/app.js"></script>
+  
+
+  <script>
+    // Footer year
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    // --- Upload + preview ---
+    const dz = document.getElementById('dz');
+    const fileInput = document.getElementById('fileInput');
+    const preview = document.getElementById('preview');
+    let selectedFile = null;
+
+    const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+    ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
+    dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
+    dz.addEventListener('dragleave', () => dz.style.outline = '');
+    dz.addEventListener('drop', (e) => {
+      dz.style.outline = '';
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) { handleFile(f); }
+    });
+    dz.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) { handleFile(f); }
+    });
+
+    function handleFile(file){
+      if(!/image\/(jpeg|png)/.test(file.type)){ alert('Please upload a JPG or PNG.'); return; }
+      selectedFile = file;
+      const url = URL.createObjectURL(file);
+      preview.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = url; img.alt = 'Uploaded image preview';
+      preview.appendChild(img);
+      validateForm();
+    }
+
+    // --- Form validation & submit (demo) ---
+    const form = document.getElementById('intakeForm');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const consent = document.getElementById('consent');
+    const formMsg = document.getElementById('formMsg');
+
+    function validateForm(){
+      const requiredIds = ['name','age','skinType','location','duration'];
+      const allFilled = requiredIds.every(id => document.getElementById(id).value.trim() !== '');
+      const ok = !!selectedFile && consent.checked && allFilled;
+      analyzeBtn.disabled = !ok;
+      formMsg.textContent = ok ? '' : 'Upload an image, fill required fields, and give consent.';
+    }
+    form.addEventListener('input', validateForm);
+    form.addEventListener('change', validateForm);
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (analyzeBtn.disabled) return;
+
+      const data = {
+        name: document.getElementById('name').value.trim(),
+        age: +document.getElementById('age').value,
+        sex: document.getElementById('sex').value,
+        fitzpatrick: document.getElementById('skinType').value, // keeping existing key
+        location: document.getElementById('location').value.trim(),
+        duration_days: +document.getElementById('duration').value,
+        symptom: document.getElementById('symptom').value,
+        family_history: document.getElementById('background').value,
+        sun_exposure: document.getElementById('sunExp').value,
+        spf: document.getElementById('spf').value,
+        meds: document.getElementById('meds').value.trim(),
+        notes: document.getElementById('notes').value.trim(),
+      };
+
+      // Updated summary text
+      document.getElementById('resultMeta').textContent =
+        `${data.name || 'Patient'}, age ${data.age} — Skin condition: ${data.fitzpatrick} — Location: ${data.location}, ${data.duration_days} day(s).`;
+
+      const tags = document.getElementById('resultTags');
+      tags.innerHTML = '';
+      [
+        data.sex && `Sex: ${data.sex}`,
+        data.symptom && `Symptom: ${data.symptom}`,
+        data.family_history && `Family hx: ${data.family_history}`,
+        data.sun_exposure && `Sun exposure: ${data.sun_exposure}`,
+        data.spf && `SPF: ${data.spf}`,
+        data.meds && `Meds: ${data.meds}`
+      ].filter(Boolean).forEach(t => {
+        const pill = document.createElement('span');
+        pill.className = 'pill';
+        pill.textContent = t;
+        tags.appendChild(pill);
+      });
+
+      document.getElementById('resultCard').classList.add('show');
+
+      // Example backend hook:
+      // const formData = new FormData();
+      // formData.append('image', selectedFile);
+      // Object.entries(data).forEach(([k,v]) => formData.append(k, v));
+      // fetch('/api/analyze', { method:'POST', body: formData }).then(...)
+    });
+
+    clearBtn.addEventListener('click', () => {
+      form.reset();
+      preview.innerHTML = '';
+      selectedFile = null;
+      document.getElementById('resultCard').classList.remove('show');
+      validateForm();
+    });
+  </script>
+
 </body>
 </html>

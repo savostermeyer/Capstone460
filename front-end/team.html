@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SkinAI Classifier — Team</title>
+  <!-- Update href if your stylesheet lives elsewhere -->
+  <link rel="stylesheet" href="styles/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header" role="banner">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
+        <div class="brand-mark" aria-hidden="true">AI</div>
+        <div class="brand-text">
+          <strong>SkinAI Classifier</strong>
+          <span>Purdue University</span>
+        </div>
+      </a>
+ <nav class="nav" aria-label="Primary">
+  <a href="index.html" class="nav-link">Home</a>
+  <a href="upload.html" class="nav-link">Upload</a>
+  <a href="reports.html" class="nav-link">Reports</a>
+  <a href="team.html" class="nav-link">About Us</a>
+  <a href="login.html" class="nav-link">Login</a>
+</nav>
+
+
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="container narrow">
+    <section class="section-pad" aria-labelledby="team-title">
+      <h1 id="team-title" class="h-title">Team</h1>
+      <p class="muted">Meet the people behind the project.</p>
+
+      <div class="team-grid">
+        <!-- Damian -->
+        <div class="member">
+          <div class="avatar">DW</div>
+          <div>
+            <h3>Damian Williams</h3>
+            <p class="muted">Team Lead · Back End</p>
+          </div>
+        </div>
+
+        <!-- Srinithi -->
+        <div class="member">
+          <div class="avatar">SY</div>
+          <div>
+            <h3>Srinithi Yalamanchili</h3>
+            <p class="muted">Front End</p>
+          </div>
+        </div>
+
+        <!-- Manuel -->
+        <div class="member">
+          <div class="avatar">MNG</div>
+          <div>
+            <h3>Manuel Nieves Garcia</h3>
+            <p class="muted">Front End</p>
+          </div>
+        </div>
+
+        <!-- Maddie -->
+        <div class="member">
+          <div class="avatar">MS</div>
+          <div>
+            <h3>Maddie Sidwell</h3>
+            <p class="muted">Full Stack</p>
+          </div>
+        </div>
+
+        <!-- Savannah -->
+        <div class="member">
+          <div class="avatar">SO</div>
+          <div>
+            <h3>Savannah Ostermeyer</h3>
+            <p class="muted">Back End</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer" role="contentinfo">
+    <div class="container">
+      <p class="footnote">© <span id="year"></span> SkinAI Classifier · Senior Capstone Project · For demonstration only.</p>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
