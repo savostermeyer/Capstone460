@@ -19,9 +19,9 @@ def _strip_exif(img: Image.Image) -> Image.Image:
 
 @app.get("/")
 def index():
-    return send_from_directory(FRONT_DIR, "index.html")
+    #return send_from_directory(FRONT_DIR, "index.html")
     # to run demo code
-    # return send_from_directory(EXP_DIR, "indexdemo.html")
+     return send_from_directory(EXP_DIR, "indexdemo.html")
 
 # Serve any other front-end files (about.html, upload.html, team.html, etc.)
 @app.get("/<path:path>")
