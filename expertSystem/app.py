@@ -1,8 +1,10 @@
 # expertSystem/app.py
 import os
+from typing import Dict  # <-- needed for _SESS type
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 from src.query import search
+from expertSystem.chat import ConvState, step as chat_step
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 FRONT_DIR = os.path.join(ROOT, "front-end")  # adjust if your folder name differs
@@ -12,21 +14,23 @@ EXP_DIR  = os.path.join(ROOT, "expertSystem")
 app = Flask(__name__, static_folder=FRONT_DIR, static_url_path="")
 
 def _strip_exif(img: Image.Image) -> Image.Image:
-    try: img = ImageOps.exif_transpose(img)
-    except Exception: pass
-    out = Image.new(img.mode, img.size); out.putdata(list(img.getdata()))
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+    out = Image.new(img.mode, img.size)
+    out.putdata(list(img.getdata()))
     return out
 
 @app.get("/")
 def index():
-    #return send_from_directory(FRONT_DIR, "index.html")
-    # to run demo code
-     return send_from_directory(EXP_DIR, "indexdemo.html")
+    # return send_from_directory(FRONT_DIR, "index.html")
+    # to run demo code:
+    return send_from_directory(EXP_DIR, "indexdemo.html")  # <- fixed indent
 
-# Serve any other front-end files (about.html, upload.html, team.html, etc.)
+# Serve other front-end files (about.html, upload.html, team.html, etc.)
 @app.get("/<path:path>")
 def static_pages(path):
-    # If the file exists in the front-end folder, serve it; otherwise 404 falls through
     try:
         return send_from_directory(FRONT_DIR, path)
     except Exception:
@@ -55,9 +59,43 @@ def do_query():
         return jsonify(error=f"failed to read image: {e}"), 400
 
     out = search(img, dict(request.form.items()), top_k=5)
-    for r in out.get("results", []):
-        r["url"] = f"/ham/{r['image_id']}.jpg"
+
+    # Add relative + absolute URLs to each result (handy for external front-ends)
+    base = request.host_url.rstrip("/")  # e.g., http://127.0.0.1:5000
+    for r in out.get("results", []) or []:
+        rel = f"/ham/{r['image_id']}.jpg"
+        r["url"] = rel
+        r["abs_url"] = f"{base}{rel}"
+
+    return jsonify(out)
+
+# ---------- Chatbot wiring ----------
+
+# hold per-session state in memory for dev; switch to a store later
+_SESS: Dict[str, ConvState] = {}
+
+@app.post("/chat")
+def chat():
+    sid = request.args.get("sid", "demo")   # TODO: replace with real session id
+    st = _SESS.get(sid) or ConvState()
+    user_text = request.form.get("text")
+    img_file = request.files.get("image")
+
+    img = None
+    if img_file and img_file.filename:
+        img = Image.open(img_file.stream).convert("RGB")
+
+    out = chat_step(st, user_text, img)
+    _SESS[sid] = st
+
+    # add absolute URLs for any image results
+    base = request.host_url.rstrip("/")
+    for r in out.get("results", []) or []:
+        rel = f"/ham/{r['image_id']}.jpg"
+        r["url"] = rel
+        r["abs_url"] = f"{base}{rel}"
     return jsonify(out)
 
 if __name__ == "__main__":
+    # Ensure all routes are defined BEFORE running
     app.run(host="127.0.0.1", port=5000, debug=True)
