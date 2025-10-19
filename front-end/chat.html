@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Expert Chat</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; }
+  .row { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+  .msg { margin: 8px 0; }
+  .you  { color:#444; }
+  .bot  { color:#0a5; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, 180px); gap:12px; margin-top:12px; }
+  .card { border:1px solid #ddd; padding:8px; border-radius:8px; }
+  img { width:100%; height:auto; border-radius:6px; }
+</style>
+
+<h1>Expert Chat</h1>
+<div id="log"></div>
+
+<form id="f" class="row">
+  <input type="text" name="text" placeholder="Type a message…" style="flex:1"/>
+  <input type="file" name="image" accept="image/*" />
+  <button>Send</button>
+</form>
+
+<div id="results" class="grid"></div>
+
+<script>
+const sid = 'demo';                   // simple dev session id
+const backend = location.origin;      // same origin as Flask
+
+const logDiv = document.getElementById('log');
+const results = document.getElementById('results');
+const form = document.getElementById('f');
+
+function addMsg(role, text) {
+  const p = document.createElement('div');
+  p.className = 'msg ' + (role === 'you' ? 'you' : 'bot');
+  p.textContent = (role === 'you' ? 'You: ' : 'Bot: ') + text;
+  logDiv.appendChild(p);
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(form);
+  const txt = fd.get('text');
+  if (txt) addMsg('you', txt);
+
+  try {
+    const res = await fetch(`${backend}/chat?sid=${encodeURIComponent(sid)}`, {
+      method: 'POST', body: fd
+    });
+    const data = await res.json();
+
+    if (data.ask) addMsg('bot', data.ask);
+    if (data.explanation) addMsg('bot', data.explanation);
+
+    results.innerHTML = '';
+    (data.results || []).forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const img = document.createElement('img');
+      img.src = r.abs_url || (backend + r.url);
+      const meta = document.createElement('div');
+      meta.textContent = `${r.image_id} | dx: ${r.dx} | sim: ${r.similarity.toFixed(3)}`;
+      card.append(img, meta);
+      results.appendChild(card);
+    });
+  } catch (err) {
+    addMsg('bot', 'Error contacting server.');
+    console.error(err);
+  }
+
+  form.reset(); // clear text/file
+});
+</script>
