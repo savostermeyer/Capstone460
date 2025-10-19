@@ -58,11 +58,11 @@
       <p class="muted">Drag and drop a JPG/PNG and answer the questions below to get analysis results.</p>
 
       <!-- Dropzone -->
-      <div id="dz" class="dropzone" tabindex="0" aria-label="Image upload area">
-        <div class="dz-inner">
+      <div id="dropzone" class="dropzone" tabindex="0" aria-label="Image upload area">
+        <div class="dropzone-inner">
           <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
-          <p class="dz-title">Drag &amp; drop your image here</p>
-          <p class="dz-sub">or click to browse</p>
+          <p class="dropzone-title">Drag &amp; drop your image here</p>
+          <p class="dropzone-sub">or click to browse</p>
           <label class="file-btn" for="fileInput">Choose File
             <input id="fileInput" type="file" accept="image/jpeg,image/png" />
           </label>
@@ -212,21 +212,21 @@
     document.getElementById('year').textContent = new Date().getFullYear();
 
     // --- Upload + preview ---
-    const dz = document.getElementById('dz');
+    const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
     const preview = document.getElementById('preview');
     let selectedFile = null;
 
     const prevent = e => { e.preventDefault(); e.stopPropagation(); };
-    ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
-    dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
-    dz.addEventListener('dragleave', () => dz.style.outline = '');
-    dz.addEventListener('drop', (e) => {
-      dz.style.outline = '';
+    ['dragenter','dragover','dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, prevent));
+    dropzone.addEventListener('dragover', () => dropzone.style.outline = '2px solid var(--gold)');
+    dropzone.addEventListener('dragleave', () => dropzone.style.outline = '');
+    dropzone.addEventListener('drop', (e) => {
+      dropzone.style.outline = '';
       const f = e.dataTransfer.files && e.dataTransfer.files[0];
       if (f) { handleFile(f); }
     });
-    dz.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
       if (f) { handleFile(f); }
