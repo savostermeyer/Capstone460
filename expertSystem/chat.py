@@ -1,148 +1,162 @@
 # expertSystem/chat.py
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
-import re
-from src.query import search as image_search
+from typing import Any, Dict, List, Optional
 
-# ---- Slots we care about (HAM-aligned + symptoms) ----
-SITES = {
-    "back","trunk","chest","abdomen","upper extremity","lower extremity",
-    "face","scalp","neck","ear","hand","foot","genital","unknown"
-}
-SYMPTOMS = ["itching","bleeding","pain","tender","growth","color change","border change","ulcer"]
+import os, json
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(usecwd=True), override=True)
+print("[load] chat.py from:", __file__)
+print("[dotenv] file:", find_dotenv(usecwd=True))
+print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
+print("[env] GEMINI_API_KEY?", bool(os.getenv("GEMINI_API_KEY")))
 
+import google.generativeai as genai
+
+API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+if not API_KEY:
+    raise RuntimeError("No API key found. Set GOOGLE_API_KEY or GEMINI_API_KEY in .env/environment.")
+genai.configure(api_key=API_KEY)
+
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-1.5-pro-latest")
+print(f"[Gemini] Using model: {MODEL_NAME}")
+
+
+# ---- API key & model ----
+API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+if not API_KEY:
+    raise RuntimeError("No API key found. Set GOOGLE_API_KEY or GEMINI_API_KEY in .env/environment.")
+genai.configure(api_key=API_KEY)
+
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-1.5-pro-latest")
+print(f"[Gemini] Using model: {MODEL_NAME}")
+
+# ---- Conversation state ----
 @dataclass
 class ConvState:
-    # User facts (slots)
-    age: Optional[int] = None
-    sex: Optional[str] = None        # "male" / "female" / None
-    site: Optional[str] = None       # normalized to HAM localization where possible
-    duration_weeks: Optional[float] = None
-    symptoms: List[str] = field(default_factory=list)  # subset of SYMPTOMS
-    image_attached: bool = False
+    history: List[Dict[str, Any]] = field(default_factory=list)
 
-    # Internal
-    asked: Dict[str, bool] = field(default_factory=dict)
-    reasons: List[str] = field(default_factory=list)
-
-    def missing(self) -> List[str]:
-        need = []
-        if self.age is None: need.append("age")
-        if self.sex is None: need.append("sex")
-        if self.site is None: need.append("site")
-        if self.duration_weeks is None: need.append("duration")
-        if not self.symptoms: need.append("symptoms")
-        if not self.image_attached: need.append("image")
-        return need
-
-# ---- Normalizers ----
-def norm_sex(s: str|None) -> str|None:
-    if not s: return None
-    s = s.strip().lower()
-    if s.startswith("m"): return "male"
-    if s.startswith("f"): return "female"
-    return None
-
-def norm_site(s: str|None) -> str|None:
-    if not s: return None
-    s = s.strip().lower()
-    # light mapping: map “arm” -> upper extremity, “leg” -> lower extremity, etc.
-    if "arm" in s: return "upper extremity"
-    if "leg" in s: return "lower extremity"
-    if s in SITES: return s
-    return s  # fallback; your index just won’t filter strictly
-
-def parse_symptoms(text: str) -> List[str]:
-    text = (text or "").lower()
-    return [w for w in SYMPTOMS if re.search(rf"\b{re.escape(w)}\b", text)]
-
-# ---- Dialog policy: what to ask next ----
-def next_question(st: ConvState) -> str|None:
-    for slot in st.missing():
-        if st.asked.get(slot): continue
-        st.asked[slot] = True
-        if slot == "image":
-            return "Please upload a clear photo of the spot (close-up and one from ~20cm)."
-        if slot == "site":
-            return "Where on the body is the spot (e.g., back, face, arm, leg)?"
-        if slot == "sex":
-            return "What is your sex (male/female)?"
-        if slot == "age":
-            return "How old are you?"
-        if slot == "duration":
-            return "How long has the spot been present (weeks)? Has it changed recently?"
-        if slot == "symptoms":
-            return "Any symptoms like itching, bleeding, pain, rapid growth, or color/border change?"
-    return None  # ready to reason
-
-# ---- Core step function ----
-def step(st: ConvState, user_text: str|None, img=None) -> Dict[str, Any]:
-    # 1) Ingest new info
-    if user_text:
-        # try to extract/fill simple slots
-        m = re.search(r"(\d{1,3})\s*(yo|years? old|y/o)?", user_text.lower())
-        if m:
-            st.age = min(110, int(m.group(1)))
-        sx = norm_sex(user_text)
-        if sx: st.sex = sx
-        site = norm_site(user_text)
-        if site: st.site = site
-        if "week" in user_text.lower():
-            mw = re.search(r"(\d+(\.\d+)?)\s*week", user_text.lower())
-            if mw: st.duration_weeks = float(mw.group(1))
-        # symptoms from free text
-        sy = parse_symptoms(user_text)
-        st.symptoms = sorted(set(st.symptoms + sy))
-
-    if img is not None:
-        st.image_attached = True
-
-    # 2) If missing info, ask next question
-    q = next_question(st)
-    if q:
-        return {"ask": q, "state": st.__dict__}
-
-    # 3) We have enough to produce a result. Build form for your image_search()
-    form = {
-        "sex": st.sex or "",
-        "localization": st.site or "",
-        "age": st.age if st.age is not None else "",
-        # knobs: strict/alpha/top_k can be set from policy or UI
-        "strict": "0",
-        "alpha": "0.85",
-        "top_k": "6",
+# ---- Tool declaration ----
+FUNCTIONS = [{
+    "name": "expert_derm_consult",
+    "description": "Run ABCDE + metadata rules and return findings/explanations.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "diameter_mm": {"type": "NUMBER", "description": "Lesion diameter in millimeters"},
+            "asymmetry": {"type": "NUMBER", "description": "0..1"},
+            "border_irregularity": {"type": "NUMBER", "description": "0..1"},
+            "color_variegation": {"type": "NUMBER", "description": "0..1"},
+            "evolution_weeks": {"type": "NUMBER", "description": "Weeks of noticeable change"},
+            "patient_age": {"type": "NUMBER"},
+            "body_site": {"type": "STRING"}
+        },
+        "required": ["diameter_mm", "patient_age"]
     }
+}]
 
-    # 4) Run tools: image NN search (required), web knowledge (optional later)
-    nn = None
-    if img is not None:
-        nn = image_search(img, form, top_k=int(form["top_k"]))
-    else:
-        # image required for best results; return ask if missing
-        return {"ask": "Please upload an image to compare against reference cases.", "state": st.__dict__}
+MODEL = genai.GenerativeModel(
+    model_name=MODEL_NAME,
+    tools=[{"function_declarations": FUNCTIONS}],
+    system_instruction=(
+        "You are a derm triage assistant embedded in a research prototype. "
+        "You are NOT a doctor; do not diagnose. Use the expert_derm_consult tool "
+        "whenever the user provides lesion details or asks for an assessment. "
+        "Ask concise follow-up questions if critical fields are missing."
+    ),
+)
 
-    # 5) Summarize neighbors + reasons (no medical diagnosis)
-    results = nn.get("results", [])
-    tally = nn.get("tally", {})
-    st.reasons.extend(nn.get("reasons", []))
-
-    explanation = []
-    if st.site: explanation.append(f"Site reported: {st.site}.")
-    if st.age is not None and st.sex:
-        explanation.append(f"Age/Sex: {st.age}, {st.sex}.")
-    if st.symptoms:
-        explanation.append(f"Symptoms: {', '.join(st.symptoms)}.")
-    explanation.append("Similar reference cases were retrieved based on visual features; these are not diagnoses.")
-    if tally:
-        # show top neighbor categories by vote
-        tv = sorted(tally.items(), key=lambda x: x[1], reverse=True)[:3]
-        explanation.append("Common neighbor labels: " + ", ".join(f"{k} (n={v})" for k,v in tv) + ".")
-
+# ---- Rule stub (replace with your expert system) ----
+def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
+    score = 0.0
+    reasons = []
+    if payload.get("diameter_mm", 0) >= 6:
+        score += 0.4; reasons.append("Diameter ≥ 6 mm")
+    if 0 < payload.get("evolution_weeks", 0) <= 8:
+        score += 0.3; reasons.append("Rapid evolution")
+    if (payload.get("color_variegation") or 0) > 0.5:
+        score += 0.2; reasons.append("Variegated color")
     return {
-        "results": results,
-        "explanation": " ".join(explanation),
-        "reasons": st.reasons,
-        "state": st.__dict__,
-        "next": "This information cannot provide a medical diagnosis. If the spot changes rapidly, bleeds, ulcerates, or you’re worried, seek in-person care."
+        "findings": [
+            {"label": "melanoma_suspected", "score": round(min(score, 0.95), 2)},
+            {"label": "nevus_atypical", "score": round(1 - min(score, 0.95), 2)},
+        ],
+        "rule_explanations": [{"rule_id": "R-ABCDE-demo", "why": ", ".join(reasons) or "No major flags"}],
+        "safety_flags": ["not_a_diagnosis"],
+        "next_questions": ["Has it bled or crusted recently?"],
+        "audit": {"rules_fired": ["R-ABCDE-demo"]}
     }
+
+# ---- Robust text extractor ----
+def _resp_text(resp) -> str:
+    try:
+        cand = (resp.candidates or [None])[0]
+        parts = getattr(getattr(cand, "content", None), "parts", []) or []
+        pieces = [getattr(p, "text", "") for p in parts if getattr(p, "text", None)]
+        txt = "".join(pieces).strip()
+        if txt:
+            return txt
+    except Exception:
+        pass
+    return (getattr(resp, "text", None) or "").strip()
+
+# ---- Main step ----
+def step(state: ConvState, user_text: Optional[str], img) -> Dict[str, Any]:
+    chat = MODEL.start_chat(history=state.history)
+
+    # 1) call model (guarded)
+    try:
+        initial = chat.send_message(user_text or "")
+    except Exception as e:
+        msg = (
+            f"Model error: {e}\n"
+            "Try setting GEMINI_MODEL to a supported name (e.g., "
+            "gemini-2.0-flash, gemini-1.5-flash-8b, or gemini-1.5-pro-latest)."
+        )
+        return {"reply": msg, "message": msg, "assistant": msg, "text": msg}
+
+    # 2) tool call handling
+    reply_text = None
+    tool_payload = None
+    cand = (initial.candidates or [None])[0]
+    parts = getattr(getattr(cand, "content", None), "parts", []) if cand else []
+    for part in parts:
+        if getattr(part, "function_call", None):
+            call = part.function_call
+            if call.name == "expert_derm_consult":
+                args = json.loads(call.args or "{}")
+                tool_payload = _run_rules(args)
+                followup = chat.send_message([
+                    {"tool_call": call},
+                    {"tool_result": {"name": call.name, "content": json.dumps(tool_payload)}}
+                ])
+                reply_text = _resp_text(followup)
+                break
+
+    # 3) fallback to model text if no tool used
+    if not reply_text:
+        reply_text = _resp_text(initial)
+
+    # 3b) absolute fallback, never empty
+    if not reply_text:
+        reply_text = "I’m here. Share diameter, color changes, evolution (weeks), age, and body site."
+
+    # 4) keep compact history
+    state.history.append({"role": "user", "parts": [user_text or ""]})
+    state.history.append({"role": "model", "parts": [reply_text]})
+
+    # 5) return multiple synonymous fields for frontend compatibility
+    out: Dict[str, Any] = {
+        "reply": reply_text,
+        "message": reply_text,
+        "assistant": reply_text,
+        "text": reply_text,
+    }
+    if tool_payload:
+        out["results"] = tool_payload.get("results", [])
+        out["explanations"] = tool_payload.get("rule_explanations", [])
+        out["findings"] = tool_payload.get("findings", [])
+        out["next_questions"] = tool_payload.get("next_questions", [])
+        out["safety_flags"] = tool_payload.get("safety_flags", [])
+        out["audit"] = tool_payload.get("audit", {})
+    return out

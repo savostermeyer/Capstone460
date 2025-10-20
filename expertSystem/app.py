@@ -1,15 +1,24 @@
 # expertSystem/app.py
 import os
-from typing import Dict  # <-- needed for _SESS type
+import sys
+from typing import Dict
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
-from src.query import search
 from expertSystem.chat import ConvState, step as chat_step
 
+# --- Project roots & import path setup ---
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-FRONT_DIR = os.path.join(ROOT, "front-end")  # adjust if your folder name differs
+SRC_DIR = os.path.join(ROOT, "src")
+if SRC_DIR not in sys.path:
+    sys.path.append(SRC_DIR)
+
+# Import after sys.path is prepared
+from query import search  # noqa: E402
+
+FRONT_DIR = os.path.join(ROOT, "front-end")
 DATA_DIR = os.path.join(ROOT, "data")
 EXP_DIR  = os.path.join(ROOT, "expertSystem")
+
 
 app = Flask(__name__, static_folder=FRONT_DIR, static_url_path="")
 
