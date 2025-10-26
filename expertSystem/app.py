@@ -1,4 +1,31 @@
-# expertSystem/app.py
+# File: expertSystem/app.py
+# Role: Flask web server for the demo + APIs.
+
+# Linked to:
+# - expertSystem/chat.py → imports ConvState and step(...) to run the intake chat at POST /chat
+# - src/query.py        → imports search(...) for image kNN at POST /query (optional)
+# - expertSystem/indexdemo.html → served at GET / as the minimal demo UI
+# - data/HAM10000_images_part_1|2 → served via GET /ham/<image_id>.jpg
+
+# Endpoints:
+# - GET  /                    → indexdemo.html
+# - POST /chat                → runs the Gemini intake assistant (chat only)
+# - POST /query               → (optional) image similarity search using FAISS (if index exists)
+# - GET  /ham/<image_id>.jpg  → serve dataset images
+# - GET  /<path>              → serve other static front-end files (if present)
+
+# Env:
+# - GEMINI_API_KEY (required), GEMINI_MODEL (default: gemini-2.0-flash)
+# - PORT (optional; defaults to 3720)
+
+# Notes:
+# - Keeps an in-memory session dict for chat state during dev.
+# - Adds absolute image URLs in responses for convenience.
+
+
+
+
+
 import os
 import sys
 from typing import Dict

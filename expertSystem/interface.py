@@ -1,4 +1,13 @@
-# expertSystem/interface.py (minimal)
+# File: expertSystem/interface.py
+# Role: Minimal interface helper for reading simple form inputs and producing a
+#       lightweight ExpertOutput (sex/site/age + reasons), without hard filters
+#       or rule bonuses.
+
+# Linked to:
+# - Can be used by UI handlers that only need basic metadata extraction
+# - Independent of the heavier rules.Facts/ExpertOutput if you want a tiny path
+
+
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Mapping
 

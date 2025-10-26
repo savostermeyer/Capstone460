@@ -1,4 +1,16 @@
-# expertSystem/schema.py
+# File: expertSystem/schema.py
+# Role: Shared data models used by normalization and rules.
+
+# Exports:
+# - CLASSES: ordered list of diagnosis labels (HAM10000 common classes)
+# - Facts: inputs from forms/intake (sex, age, site, ABCDE flags)
+# - ExpertOutput: outputs of rules (hard filters, class bonuses, reasons)
+
+# Linked to:
+# - Imported by normalize.py and rules.py
+# - Can be used by any module that needs typed containers
+
+
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
 

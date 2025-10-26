@@ -1,5 +1,24 @@
-# expertSystem/fetch_ham.py
-# pip install "kagglehub[pandas-datasets]"
+# File: expertSystem/fetch_ham.py
+# Role: Helper to fetch HAM10000 dataset via KaggleHub.
+
+# What it does:
+# - Downloads metadata CSV and the two image zip parts.
+# - Unzips into:
+#     data/HAM10000_images_part_1/
+#     data/HAM10000_images_part_2/
+# - Writes:
+#     data/HAM10000_metadata.csv
+
+# Linked to:
+# - Called automatically by build_index.py if the expected data files/folders are absent.
+
+# Prereqs:
+# - `pip install "kagglehub[pandas-datasets]"` and have network access.
+
+
+
+
+
 import os, zipfile
 import kagglehub as kh
 from kagglehub import KaggleDatasetAdapter as KDA

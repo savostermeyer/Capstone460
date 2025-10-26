@@ -1,6 +1,16 @@
-# your logic (filters + bonuses + reasons)
+# File: expertSystem/rules.py
+# Role: Lightweight expert-logic layer that derives filters/bonuses/reasons
+#       from normalized Facts (ABCDE + demographics).
 
-# expertSystem/rules.py
+# Linked to:
+# - Uses expertSystem/schema.py (Facts, ExpertOutput)
+# - Can be invoked before/after kNN search to bias rankings
+
+# What it does:
+# - Sets hard filters (sex, site, age bounds) when available
+# - Computes a simple ABCDE score to set soft bonuses for classes
+# - Adds human-readable reasons for transparency in the UI
+
 from .schema import Facts, ExpertOutput
 
 def _abcde_score(f: Facts) -> int:
