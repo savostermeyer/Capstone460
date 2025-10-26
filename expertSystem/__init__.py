@@ -1,4 +1,11 @@
-# expertSystem/__init__.py
+# File: expertSystem/__init__.py
+# Role: Package initializer. Re-exports helpers for simpler imports.
+
+# Linked to:
+# - Intended to expose utilities like infer_from_form(...) to external callers.
+# - Example usage (from elsewhere):
+#     from expertSystem import infer_from_form
+
 from .interface import infer_from_form
 
 

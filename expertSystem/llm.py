@@ -1,4 +1,17 @@
-# expertSystem/llm.py
+# File: expertSystem/llm.py
+# Role: Thin wrapper around the OpenAI Chat Completions API (separate from Gemini).
+
+# Linked to:
+# - Optional utility if you want to use OpenAI models in parallel to Gemini
+# - Not used by app.py unless you import it explicitly
+
+# Env:
+# - OPENAI_API_KEY (read via python-dotenv)
+
+# Notes:
+# - DEFAULT_MODEL is set to a fast/cheap preset; swap as needed
+
+
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
