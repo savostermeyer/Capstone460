@@ -37,14 +37,6 @@ def index():
     # to run demo code:
     return send_from_directory(EXP_DIR, "indexdemo.html")  # <- fixed indent
 
-# Serve other front-end files (about.html, upload.html, team.html, etc.)
-@app.get("/<path:path>")
-def static_pages(path):
-    try:
-        return send_from_directory(FRONT_DIR, path)
-    except Exception:
-        return jsonify(error=f"{path} not found"), 404
-
 @app.get("/ham/<image_id>.jpg")
 def ham(image_id: str):
     for sub in ("HAM10000_images_part_1", "HAM10000_images_part_2"):
@@ -78,6 +70,15 @@ def do_query():
 
     return jsonify(out)
 
+# Serve other front-end files (about.html, upload.html, team.html, etc.)
+@app.get("/<path:path>")
+def static_pages(path):
+    try:
+        return send_from_directory(FRONT_DIR, path)
+    except Exception:
+        return jsonify(error=f"{path} not found"), 404
+
+
 # ---------- Chatbot wiring ----------
 
 # hold per-session state in memory for dev; switch to a store later
@@ -85,26 +86,38 @@ _SESS: Dict[str, ConvState] = {}
 
 @app.post("/chat")
 def chat():
-    sid = request.args.get("sid", "demo")   # TODO: replace with real session id
-    st = _SESS.get(sid) or ConvState()
-    user_text = request.form.get("text")
-    img_file = request.files.get("image")
+    try:
+        sid = request.args.get("sid", "demo")   # TODO: real session id later
+        st = _SESS.get(sid) or ConvState()
+        user_text = request.form.get("text")
+        img_file = request.files.get("image")
 
-    img = None
-    if img_file and img_file.filename:
-        img = Image.open(img_file.stream).convert("RGB")
+        img = None
+        if img_file and img_file.filename:
+            img = Image.open(img_file.stream).convert("RGB")
 
-    out = chat_step(st, user_text, img)
-    _SESS[sid] = st
+        out = chat_step(st, user_text, img)
+        _SESS[sid] = st
 
-    # add absolute URLs for any image results
-    base = request.host_url.rstrip("/")
-    for r in out.get("results", []) or []:
-        rel = f"/ham/{r['image_id']}.jpg"
-        r["url"] = rel
-        r["abs_url"] = f"{base}{rel}"
-    return jsonify(out)
+        # add absolute URLs for any image results
+        base = request.host_url.rstrip("/")
+        for r in out.get("results", []) or []:
+            image_id = r.get("image_id")
+            if image_id:  # guard in case field missing
+                rel = f"/ham/{image_id}.jpg"
+                r["url"] = rel
+                r["abs_url"] = f"{base}{rel}"
+
+        return jsonify(out)
+
+    except Exception as e:
+        # Log full traceback to console for debugging
+        import traceback
+        traceback.print_exc()
+        msg = f"Server error: {e}"
+        # Keep 200 so the frontend can render the message in the chat bubble
+        return jsonify({"reply": msg, "message": msg, "assistant": msg, "text": msg}), 200
 
 if __name__ == "__main__":
-    # Ensure all routes are defined BEFORE running
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    port = int(os.getenv("PORT", "3720"))
+    app.run(host="0.0.0.0", port=port, debug=True)
