@@ -1,6 +1,18 @@
-# map form answers → canonical values (sex/site/age)
 
-# expertSystem/normalize.py
+
+# File: expertSystem/normalize.py
+# Role: Map raw form fields to canonical types/values and assemble a Facts object.
+
+# Linked to:
+# - Uses expertSystem/schema.py (Facts dataclass)
+# - Called by any code that wants to convert web form inputs → Facts
+# - Often used before applying rules or building queries
+
+# Notes:
+# - Normalizes sex/site/age and ABCDE-like flags (booleans, ints, floats)
+# - LOCALIZATION_CANON maps common site strings to canonical values
+
+
 from .schema import Facts
 
 LOCALIZATION_CANON = {

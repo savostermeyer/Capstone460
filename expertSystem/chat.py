@@ -1,4 +1,30 @@
-# expertSystem/chat.py
+# File: expertSystem/chat.py
+# Role: Gemini-powered dermatology intake assistant (NOT a diagnosis system).
+#       Holds persona/system prompt, tool (function) schema, SDK-safe tool-calling,
+#       and a small rule engine that produces a risk-oriented summary.
+
+# Exports:
+# - ConvState → conversation history container for Gemini chat sessions
+# - step(state, user_text, img) → dict response used by /chat
+
+# Linked to:
+# - Called by expertSystem/app.py’s POST /chat endpoint.
+
+# Key behaviors:
+# - Patient-friendly questions (ABCDE, symptoms, change); always disclaimers.
+# - Tool name: 'expert_derm_consult' (JSON Schema types are lowercase).
+# - Rule engine (_run_rules): combines size/evolution/symptoms/ABCDE/risk factors
+#   into a simple “risk signal” + suggested next questions.
+# - SDK-robustness: accepts function-call args as strings or mappings, uses
+#   submit_tool_outputs when available, otherwise formats a direct reply.
+# - Stores history parts as {"text": "..."} to match Gemini SDK expectations.
+# """
+
+
+
+
+
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
