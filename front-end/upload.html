@@ -41,11 +41,11 @@
         </div>
       </a>
     <nav class="nav" aria-label="Primary">
-  <a href="index.html" class="nav-link">Home</a>
-  <a href="upload.html" class="nav-link">Upload</a>
-  <a href="reports.html" class="nav-link">Reports</a>
-  <a href="team.html" class="nav-link">About Us</a>
-  <a href="login.html" class="nav-link">Login</a>
+  <a href="index.html"  class="nav-link" data-page="index.html">Home</a>
+  <a href="upload.html"  class="nav-link" data-page="upload.html">Upload</a>
+  <a href="reports.html" class="nav-link" data-page="reports.html">Reports</a>
+  <a href="about.html"   class="nav-link" data-page="about.html">About Us</a>
+  <a href="login.html"   class="nav-link js-login-link" data-page="login.html">Login</a>
 </nav>
 
     </div>
@@ -206,116 +206,7 @@
     </div>
   </footer>
   
-
-  <script>
-    // Footer year
-    document.getElementById('year').textContent = new Date().getFullYear();
-
-    // --- Upload + preview ---
-    const dz = document.getElementById('dz');
-    const fileInput = document.getElementById('fileInput');
-    const preview = document.getElementById('preview');
-    let selectedFile = null;
-
-    const prevent = e => { e.preventDefault(); e.stopPropagation(); };
-    ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
-    dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
-    dz.addEventListener('dragleave', () => dz.style.outline = '');
-    dz.addEventListener('drop', (e) => {
-      dz.style.outline = '';
-      const f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) { handleFile(f); }
-    });
-    dz.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', (e) => {
-      const f = e.target.files && e.target.files[0];
-      if (f) { handleFile(f); }
-    });
-
-    function handleFile(file){
-      if(!/image\/(jpeg|png)/.test(file.type)){ alert('Please upload a JPG or PNG.'); return; }
-      selectedFile = file;
-      const url = URL.createObjectURL(file);
-      preview.innerHTML = '';
-      const img = document.createElement('img');
-      img.src = url; img.alt = 'Uploaded image preview';
-      preview.appendChild(img);
-      validateForm();
-    }
-
-    // --- Form validation & submit (demo) ---
-    const form = document.getElementById('intakeForm');
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    const clearBtn = document.getElementById('clearBtn');
-    const consent = document.getElementById('consent');
-    const formMsg = document.getElementById('formMsg');
-
-    function validateForm(){
-      const requiredIds = ['name','age','skinType','location','duration'];
-      const allFilled = requiredIds.every(id => document.getElementById(id).value.trim() !== '');
-      const ok = !!selectedFile && consent.checked && allFilled;
-      analyzeBtn.disabled = !ok;
-      formMsg.textContent = ok ? '' : 'Upload an image, fill required fields, and give consent.';
-    }
-    form.addEventListener('input', validateForm);
-    form.addEventListener('change', validateForm);
-
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      if (analyzeBtn.disabled) return;
-
-      const data = {
-        name: document.getElementById('name').value.trim(),
-        age: +document.getElementById('age').value,
-        sex: document.getElementById('sex').value,
-        fitzpatrick: document.getElementById('skinType').value, // keeping existing key
-        location: document.getElementById('location').value.trim(),
-        duration_days: +document.getElementById('duration').value,
-        symptom: document.getElementById('symptom').value,
-        family_history: document.getElementById('background').value,
-        sun_exposure: document.getElementById('sunExp').value,
-        spf: document.getElementById('spf').value,
-        meds: document.getElementById('meds').value.trim(),
-        notes: document.getElementById('notes').value.trim(),
-      };
-
-      // Updated summary text
-      document.getElementById('resultMeta').textContent =
-        `${data.name || 'Patient'}, age ${data.age} — Skin condition: ${data.fitzpatrick} — Location: ${data.location}, ${data.duration_days} day(s).`;
-
-      const tags = document.getElementById('resultTags');
-      tags.innerHTML = '';
-      [
-        data.sex && `Sex: ${data.sex}`,
-        data.symptom && `Symptom: ${data.symptom}`,
-        data.family_history && `Family hx: ${data.family_history}`,
-        data.sun_exposure && `Sun exposure: ${data.sun_exposure}`,
-        data.spf && `SPF: ${data.spf}`,
-        data.meds && `Meds: ${data.meds}`
-      ].filter(Boolean).forEach(t => {
-        const pill = document.createElement('span');
-        pill.className = 'pill';
-        pill.textContent = t;
-        tags.appendChild(pill);
-      });
-
-      document.getElementById('resultCard').classList.add('show');
-
-      // Example backend hook:
-      // const formData = new FormData();
-      // formData.append('image', selectedFile);
-      // Object.entries(data).forEach(([k,v]) => formData.append(k, v));
-      // fetch('/api/analyze', { method:'POST', body: formData }).then(...)
-    });
-
-    clearBtn.addEventListener('click', () => {
-      form.reset();
-      preview.innerHTML = '';
-      selectedFile = null;
-      document.getElementById('resultCard').classList.remove('show');
-      validateForm();
-    });
-  </script>
-
+<script src="scripts/app.js"></script>
+<script src="scripts/upload.js"></script>
 </body>
 </html>
