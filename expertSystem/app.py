@@ -60,9 +60,9 @@ def _strip_exif(img: Image.Image) -> Image.Image:
 
 @app.get("/")
 def index():
-    # return send_from_directory(FRONT_DIR, "index.html")
+    #  return send_from_directory(FRONT_DIR, "index.html")
     # to run demo code:
-    return send_from_directory(EXP_DIR, "indexdemo.html")  # <- fixed indent
+     return send_from_directory(EXP_DIR, "indexdemo.html")  # <- fixed indent
 
 @app.get("/ham/<image_id>.jpg")
 def ham(image_id: str):

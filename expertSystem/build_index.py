@@ -1,4 +1,31 @@
-# expertSystem/build_index.py
+# File: expertSystem/build_index.py
+# Role: Build the FAISS index used by the (optional) image search feature.
+
+# What it does:
+# - Loads HAM10000 metadata and images (auto-fetches with expertSystem/fetch_ham.py if missing).
+# - Extracts 2048-D ResNet50 (ImageNet) embeddings in batches.
+# - L2-normalizes embeddings and builds a FAISS inner-product index (cosine similarity).
+# - Saves:
+#     data/index/faiss.index
+#     data/index/image_ids.json
+#     data/index/meta.json  (compact metadata: dx, sex, age, localization)
+
+# Linked to:
+# - Used offline to prepare the artifacts consumed by src/query.py
+# - expertSystem/app.py → /query endpoint will read these files via src/query.py
+
+# Run:
+# - `python -m expertSystem.build_index` (adjust batch size inside main() if needed)
+
+# Notes:
+# - Uses torchvision’s ResNet50_Weights.IMAGENET1K_V2 and its default transforms.
+# - Device auto-select (CPU/GPU) via torch.cuda.is_available().
+# """
+
+
+
+
+
 import os, json, math
 import numpy as np
 import pandas as pd
