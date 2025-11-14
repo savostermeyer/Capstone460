@@ -58,11 +58,19 @@
       <p class="muted">Drag and drop a JPG/PNG and answer the questions below to get analysis results.</p>
 
       <!-- Dropzone -->
+<<<<<<< HEAD
       <div id="dz" class="dropzone" tabindex="0" aria-label="Image upload area">
         <div class="dz-inner">
           <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
           <p class="dz-title">Drag &amp; drop your image here</p>
           <p class="dz-sub">or click to browse</p>
+=======
+      <div id="dropzone" class="dropzone" tabindex="0" aria-label="Image upload area">
+        <div class="dropzone-inner">
+          <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
+          <p class="dropzone-title">Drag &amp; drop your image here</p>
+          <p class="dropzone-sub">or click to browse</p>
+>>>>>>> 3388dbb778194539f6939003b16e15bbea8f23cc
           <label class="file-btn" for="fileInput">Choose File
             <input id="fileInput" type="file" accept="image/jpeg,image/png" />
           </label>
@@ -212,12 +220,17 @@
     document.getElementById('year').textContent = new Date().getFullYear();
 
     // --- Upload + preview ---
+<<<<<<< HEAD
     const dz = document.getElementById('dz');
+=======
+    const dropzone = document.getElementById('dropzone');
+>>>>>>> 3388dbb778194539f6939003b16e15bbea8f23cc
     const fileInput = document.getElementById('fileInput');
     const preview = document.getElementById('preview');
     let selectedFile = null;
 
     const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+<<<<<<< HEAD
     ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
     dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
     dz.addEventListener('dragleave', () => dz.style.outline = '');
@@ -227,6 +240,17 @@
       if (f) { handleFile(f); }
     });
     dz.addEventListener('click', () => fileInput.click());
+=======
+    ['dragenter','dragover','dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, prevent));
+    dropzone.addEventListener('dragover', () => dropzone.style.outline = '2px solid var(--gold)');
+    dropzone.addEventListener('dragleave', () => dropzone.style.outline = '');
+    dropzone.addEventListener('drop', (e) => {
+      dropzone.style.outline = '';
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) { handleFile(f); }
+    });
+    dropzone.addEventListener('click', () => fileInput.click());
+>>>>>>> 3388dbb778194539f6939003b16e15bbea8f23cc
     fileInput.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
       if (f) { handleFile(f); }
@@ -301,11 +325,49 @@
 
       document.getElementById('resultCard').classList.add('show');
 
-      // Example backend hook:
-      // const formData = new FormData();
-      // formData.append('image', selectedFile);
-      // Object.entries(data).forEach(([k,v]) => formData.append(k, v));
-      // fetch('/api/analyze', { method:'POST', body: formData }).then(...)
+      // Send to Flask backend 
+      const formData = new FormData();
+      formData.append('image', selectedFile)
+
+      //combine text + image data
+      Object.entries(data).forEach(([k,v])=> formData.append(k,v));
+
+      //show loading message
+      formMsg.textContent = "Analyzing image...";
+      analyzeBtn.disabled = true;
+
+      fetch('http://127.0.0.1:3720/chat', {
+        method: 'POST',
+        body: formData  
+      })
+        .then(res => res.json())
+        .then(json => {
+          console.log("Server response:", json);
+          formMsg.textContent = "Analysis complete!";
+          analyzeBtn.disabled = false;
+
+          // Format later to have a better response
+          document.getElementById('resultCard').classList.add('show');
+          document.getElementById('resultMeta').textContent = 
+          `${data.name || 'Patient'}, age ${data.age} - ${json.reply || 'AI processed successfully.'}`;
+
+          // add backend results (if any)
+          const tags = document.getElementById('resultTags');
+          tags.innerHTML = '';
+          if(json.results && Array.isArray(json.results)){
+            json.results.forEach(r => {
+              const pill = document.createElement('span');
+              pill.className = 'pill';
+              pill.textContent = r.label || r.prediction || JSON.stringify(r);
+              tags.appendChild(pill);
+            })
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          formMsg.textContent ="Error connecting to backend.";
+          analyzeBtn.disabled = false;
+        })
     });
 
     clearBtn.addEventListener('click', () => {
@@ -317,6 +379,7 @@
     });
   </script>
 
+<<<<<<< HEAD
 <!-- Floating Chatbot Widget -->
 <div id="chatbot-widget">
   <div id="chatbot-button">
@@ -340,5 +403,7 @@
 </div>
 
 
+=======
+>>>>>>> 3388dbb778194539f6939003b16e15bbea8f23cc
 </body>
 </html>
