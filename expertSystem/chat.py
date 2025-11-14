@@ -328,8 +328,39 @@ def _resp_text(resp) -> str:
     return (getattr(resp, "text", None) or "").strip()
 
 # ---- Main step ----
-def step(state: ConvState, user_text: Optional[str], img) -> Dict[str, Any]:
+def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dict[str,Any]]=None) -> Dict[str, Any]:
+    
+    # Merge metadata into AI input(provided from upload.html)
+    
+    summary_text =""
+    if metadata:
+        parts = []
+        
+        if metadata.get("name"):
+            parts.append(f"Patient: {metadata['name']}")
+        if metadata.get("age"):
+            parts.append(f"Age: {metadata['age']}")
+        if metadata.get("fitzpatrick"):
+            parts.append(f"Skin type: {metadata['fitzpatrick']}")
+        if metadata.get("location"):
+            parts.append(f"Lesion location: {metadata['location']}")
+        if metadata.get("duration_days"):
+            parts.append(f"Duration: {metadata['duration_days']} day(s)")
+        if metadata.get("symptom"):
+            parts.append(f"Main symptom: {metadata['symptom']}")
+            
+        summary_text = " • ".join(parts)
+        
+        if user_text:
+            user_text = summary_text + "\n\nUser notes: " + user_text
+        else:
+            user_text = summary_text
+            
+    
+    # start the model char
     chat = _get_model().start_chat(history=state.history)
+    
+    
 
     # 1) call model (guarded)
     try:
