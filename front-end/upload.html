@@ -58,11 +58,19 @@
       <p class="muted">Drag and drop a JPG/PNG and answer the questions below to get analysis results.</p>
 
       <!-- Dropzone -->
+<<<<<<< HEAD
       <div id="dropzone" class="dropzone" tabindex="0" aria-label="Image upload area">
         <div class="dropzone-inner">
           <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
           <p class="dropzone-title">Drag &amp; drop your image here</p>
           <p class="dropzone-sub">or click to browse</p>
+=======
+      <div id="dz" class="dropzone" tabindex="0" aria-label="Image upload area">
+        <div class="dz-inner">
+          <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
+          <p class="dz-title">Drag &amp; drop your image here</p>
+          <p class="dz-sub">or click to browse</p>
+>>>>>>> ec3f946616f8d85fc8163121ce3b1a357a77c25e
           <label class="file-btn" for="fileInput">Choose File
             <input id="fileInput" type="file" accept="image/jpeg,image/png" />
           </label>
@@ -212,12 +220,17 @@
     document.getElementById('year').textContent = new Date().getFullYear();
 
     // --- Upload + preview ---
+<<<<<<< HEAD
     const dropzone = document.getElementById('dropzone');
+=======
+    const dz = document.getElementById('dz');
+>>>>>>> ec3f946616f8d85fc8163121ce3b1a357a77c25e
     const fileInput = document.getElementById('fileInput');
     const preview = document.getElementById('preview');
     let selectedFile = null;
 
     const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+<<<<<<< HEAD
     ['dragenter','dragover','dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, prevent));
     dropzone.addEventListener('dragover', () => dropzone.style.outline = '2px solid var(--gold)');
     dropzone.addEventListener('dragleave', () => dropzone.style.outline = '');
@@ -227,6 +240,17 @@
       if (f) { handleFile(f); }
     });
     dropzone.addEventListener('click', () => fileInput.click());
+=======
+    ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
+    dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
+    dz.addEventListener('dragleave', () => dz.style.outline = '');
+    dz.addEventListener('drop', (e) => {
+      dz.style.outline = '';
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) { handleFile(f); }
+    });
+    dz.addEventListener('click', () => fileInput.click());
+>>>>>>> ec3f946616f8d85fc8163121ce3b1a357a77c25e
     fileInput.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
       if (f) { handleFile(f); }
@@ -354,6 +378,29 @@
       validateForm();
     });
   </script>
+
+<!-- Floating Chatbot Widget -->
+<div id="chatbot-widget">
+  <div id="chatbot-button">
+    <span class="chat-icon">💬</span>
+    <span class="chat-label">Talk to AI Agent</span>
+  </div>
+
+  <div id="chatbot-window">
+    <div id="chatbot-header">
+      <span>Talk to AI Agent</span>
+      <button id="chatbot-close">✕</button>
+    </div>
+
+    <div id="chatbot-messages"></div>
+
+    <div id="chatbot-input-area">
+      <input id="chatbot-input" type="text" placeholder="Type your message…" />
+      <button id="chatbot-send">➤</button>
+    </div>
+  </div>
+</div>
+
 
 </body>
 </html>
