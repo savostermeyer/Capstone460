@@ -11,7 +11,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 
   <style>
-    /* Additional form styling */
     .q-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
     .q-card{ background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px; box-shadow: var(--shadow); }
     .q-label{ display:block; font-weight:700; margin-bottom:8px; }
@@ -35,7 +34,7 @@
 
 <body>
   <!-- Header -->
-  <header class="site-header" role="banner">
+  <header class="site-header">
     <div class="container header-inner">
       <a class="brand" href="index.html">
         <div class="brand-mark">AI</div>
@@ -47,7 +46,7 @@
 
       <nav class="nav">
         <a href="index.html" class="nav-link">Home</a>
-        <a href="upload.html" class="nav-link">Upload</a>
+        <a href="upload.html" class="nav-link active">Upload</a>
         <a href="reports.html" class="nav-link">Reports</a>
         <a href="team.html" class="nav-link">About Us</a>
         <a href="login.html" class="nav-link">Login</a>
@@ -62,10 +61,9 @@
       <p class="muted">Drag and drop JPG/PNG files or click to browse.</p>
 
       <!-- DROPZONE -->
-      <div id="dz" class="dropzone card" tabindex="0" aria-label="Image upload area" 
-           style="padding:28px; text-align:center;">
+      <div id="dz" class="dropzone card" tabindex="0">
         <div style="font-size:2rem;">⬆️</div>
-        <p class="dz-title" style="font-weight:700; margin-top:8px;">Drag & drop your images here</p>
+        <p class="dz-title" style="font-weight:700;">Drag & drop your images here</p>
         <p class="dz-sub" style="color:var(--muted)">or click to browse</p>
 
         <label class="file-btn" style="margin-top:10px;">
@@ -76,9 +74,9 @@
         <p class="q-hint">Tip: Upload multiple images for comparison.</p>
       </div>
 
-      <!-- MULTI-PREVIEW GRID -->
-      <div id="preview" class="preview" 
-           style="margin-top:16px; display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
+      <!-- PREVIEW -->
+      <div id="preview" class="preview"
+        style="margin-top:16px; display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
       </div>
 
       <!-- FORM -->
@@ -132,7 +130,8 @@
 
           <div class="q-card" style="grid-column:1/-1;">
             <label>
-              <input id="consent" type="checkbox" /> I confirm this image is mine and consent to analysis. <span class="req">*</span>
+              <input id="consent" type="checkbox" /> I confirm this image is mine and consent to analysis.
+              <span class="req">*</span>
             </label>
           </div>
         </div>
@@ -160,184 +159,87 @@
     </div>
   </footer>
 
+  <!-- Upload JS -->
   <script>
-  // Footer year
-  document.getElementById('year').textContent = new Date().getFullYear();
+    document.getElementById('year').textContent = new Date().getFullYear();
 
-  /* --- Upload + preview --- */
-  const dz = document.getElementById('dz');
-  const fileInput = document.getElementById('fileInput');
-  const preview = document.getElementById('preview');
-  let selectedFile = null;
+    const dz = document.getElementById('dz');
+    const fileInput = document.getElementById('fileInput');
+    const preview = document.getElementById('preview');
 
-  const prevent = e => { e.preventDefault(); e.stopPropagation(); };
-  ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
-  dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
-  dz.addEventListener('dragleave', () => dz.style.outline = '');
-  dz.addEventListener('drop', (e) => {
-    dz.style.outline = '';
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) handleFile(f);
-  });
-  dz.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (f) handleFile(f);
-  });
+    let selectedFiles = [];
+    let justDropped = false;
 
-  function handleFile(file){
-    if(!/image\/(jpeg|png)/.test(file.type)){
-      alert('Please upload a JPG or PNG.');
-      return;
+    const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+    ['dragenter','dragover','dragleave','drop'].forEach(evt =>
+      dz.addEventListener(evt, prevent)
+    );
+
+    dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
+    dz.addEventListener('dragleave', () => dz.style.outline = '');
+
+    dz.addEventListener('drop', e => {
+      dz.style.outline = '';
+      justDropped = true;
+
+      const files = [...e.dataTransfer.files].filter(f =>
+        /image\/(jpeg|png)/.test(f.type)
+      );
+      if (files.length) handleFiles(files);
+    });
+
+    // prevent double-opening
+    dz.addEventListener('click', (e) => {
+      if (e.target.tagName === "LABEL" || e.target.tagName === "INPUT") return;
+      if (justDropped) { justDropped = false; return; }
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', e => {
+      const files = [...e.target.files].filter(f =>
+        /image\/(jpeg|png)/.test(f.type)
+      );
+      if (files.length) handleFiles(files);
+    });
+
+    function handleFiles(files) {
+      selectedFiles = [...selectedFiles, ...files];
+      preview.innerHTML = "";
+
+      selectedFiles.forEach((file, index) => {
+        const url = URL.createObjectURL(file);
+        const wrap = document.createElement("div");
+        wrap.style.position = "relative";
+
+        const img = document.createElement("img");
+        img.src = url;
+
+        const del = document.createElement("button");
+        del.textContent = "✕";
+        del.style.position = "absolute";
+        del.style.top = "6px";
+        del.style.right = "6px";
+        del.style.background = "rgba(0,0,0,0.7)";
+        del.style.color = "white";
+        del.style.border = "none";
+        del.style.padding = "2px 6px";
+        del.style.cursor = "pointer";
+        del.style.borderRadius = "4px";
+
+        del.onclick = () => {
+          selectedFiles.splice(index, 1);
+          handleFiles([]);
+        };
+
+        wrap.appendChild(img);
+        wrap.appendChild(del);
+        preview.appendChild(wrap);
+      });
     }
-    selectedFile = file;
-    const url = URL.createObjectURL(file);
-    preview.innerHTML = '';
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = 'Uploaded image preview';
-    preview.appendChild(img);
-    validateForm();
-  }
 
-  /* --- Form validation --- */
-  const form = document.getElementById('intakeForm');
-  const analyzeBtn = document.getElementById('analyzeBtn');
-  const clearBtn = document.getElementById('clearBtn');
-  const consent = document.getElementById('consent');
-  const formMsg = document.getElementById('formMsg');
+  </script>
 
-  function validateForm(){
-    const requiredIds = ['name','age','skinType','location','duration'];
-    const allFilled = requiredIds.every(id => document.getElementById(id).value.trim() !== '');
-    const ok = !!selectedFile && consent.checked && allFilled;
-    analyzeBtn.disabled = !ok;
-    formMsg.textContent = ok ? '' : 'Upload an image, fill required fields, and give consent.';
-  }
-
-  form.addEventListener('input', validateForm);
-  form.addEventListener('change', validateForm);
-
-  /* --- Submit to backend --- */
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (analyzeBtn.disabled) return;
-
-    const data = {
-      name: document.getElementById('name').value.trim(),
-      age: +document.getElementById('age').value,
-      sex: document.getElementById('sex').value,
-      fitzpatrick: document.getElementById('skinType').value,
-      location: document.getElementById('location').value.trim(),
-      duration_days: +document.getElementById('duration').value,
-      symptom: document.getElementById('symptom').value,
-      family_history: document.getElementById('background').value,
-      sun_exposure: document.getElementById('sunExp').value,
-      spf: document.getElementById('spf').value,
-      meds: document.getElementById('meds').value.trim(),
-      notes: document.getElementById('notes').value.trim(),
-    };
-
-    const tags = document.getElementById('resultTags');
-    tags.innerHTML = '';
-
-    [
-      data.sex && `Sex: ${data.sex}`,
-      data.symptom && `Symptom: ${data.symptom}`,
-      data.family_history && `Family hx: ${data.family_history}`,
-      data.sun_exposure && `Sun exposure: ${data.sun_exposure}`,
-      data.spf && `SPF: ${data.spf}`,
-      data.meds && `Meds: ${data.meds}`
-    ]
-    .filter(Boolean)
-    .forEach(t => {
-      const pill = document.createElement('span');
-      pill.className = 'pill';
-      pill.textContent = t;
-      tags.appendChild(pill);
-    });
-
-    document.getElementById('resultCard').classList.add('show');
-
-    const formData = new FormData();
-    formData.append('image', selectedFile);
-
-    Object.entries(data).forEach(([k,v]) => formData.append(k,v));
-
-    formMsg.textContent = "Analyzing image...";
-    analyzeBtn.disabled = true;
-
-    fetch('http://127.0.0.1:3720/chat', {
-      method: 'POST',
-      body: formData
-    })
-    .then(res => res.json())
-    .then(json => {
-      console.log("Server response:", json);
-      formMsg.textContent = "Analysis complete!";
-      analyzeBtn.disabled = false;
-
-      document.getElementById('resultMeta').textContent =
-        `${data.name || 'Patient'}, age ${data.age} — ${json.reply || 'AI processed successfully.'}`;
-
-      tags.innerHTML = '';
-
-      if (json.results && Array.isArray(json.results)){
-        json.results.forEach(r => {
-          const pill = document.createElement('span');
-          pill.className = 'pill';
-          pill.textContent = r.label || r.prediction || JSON.stringify(r);
-          tags.appendChild(pill);
-        });
-      }
-    })
-    .catch(err => {
-      console.error(err);
-      formMsg.textContent ="Error connecting to backend.";
-      analyzeBtn.disabled = false;
-    });
-  });
-
-  clearBtn.addEventListener('click', () => {
-    form.reset();
-    preview.innerHTML = '';
-    selectedFile = null;
-    document.getElementById('resultCard').classList.remove('show');
-    validateForm();
-  });
-</script>
-
-
-<!-- Floating Chatbot Widget -->
-<div id="chatbot-widget">
-  <div id="chatbot-button">
-    <span class="chat-icon">💬</span>
-    <span class="chat-label">Talk to AI Agent</span>
-  </div>
-
-  function validateForm() {
-    const required = ["name","age","skinType","location","duration"];
-    const ok = required.every(id => document.getElementById(id).value.trim() !== "")
-              && consent.checked
-              && selectedFiles.length > 0;
-
-    analyzeBtn.disabled = !ok;
-  }
-
-  document.getElementById("intakeForm").addEventListener("input", validateForm);
-  document.getElementById("intakeForm").addEventListener("change", validateForm);
-
-  /* ---------- CLEAR BUTTON ---------- */
-  document.getElementById("clearBtn").onclick = () => {
-    selectedFiles = [];
-    preview.innerHTML = "";
-    document.getElementById("intakeForm").reset();
-    analyzeBtn.disabled = true;
-  };
-</script>
-
-
-  <!-- CHATBOT -->
+  <!-- CHATBOT WIDGET (Correct — only one version) -->
   <div id="chatbot-widget">
     <div id="chatbot-button">
       <span class="chat-icon">💬</span>
@@ -359,6 +261,8 @@
     </div>
   </div>
 
+  <!-- Correct chatbot JS path -->
   <script src="scripts/chatbot.js"></script>
+
 </body>
 </html>
