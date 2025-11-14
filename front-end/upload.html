@@ -4,12 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SkinAI Classifier — Upload</title>
+
   <link rel="stylesheet" href="styles/styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+
   <style>
-    /* --- Additions to make the form “boxed” and airy --- */
+    /* Additional form styling */
     .q-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
     .q-card{ background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px; box-shadow: var(--shadow); }
     .q-label{ display:block; font-weight:700; margin-bottom:8px; }
@@ -26,72 +28,78 @@
     .pill{ display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid #2a2a2a; background:#111; margin: 2px 6px 0 0; font-size:.85rem; }
     .result{ display:none; } .result.show{ display:block; }
     .req{ color: var(--gold); margin-left: 4px; }
-    .dropzone{ outline-offset:4px; } .dropzone:focus{ outline:2px solid var(--gold); }
+    .dropzone{ outline-offset:4px; cursor:pointer; }
+    .preview img{ width:100%; height:220px; object-fit:cover; border-radius:12px; border:1px solid #2a2a2a; }
   </style>
 </head>
+
 <body>
   <!-- Header -->
   <header class="site-header" role="banner">
     <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
-        <div class="brand-mark" aria-hidden="true">AI</div>
+      <a class="brand" href="index.html">
+        <div class="brand-mark">AI</div>
         <div class="brand-text">
           <strong>SkinAI Classifier</strong>
           <span>Purdue University</span>
         </div>
       </a>
-    <nav class="nav" aria-label="Primary">
-  <a href="index.html" class="nav-link">Home</a>
-  <a href="upload.html" class="nav-link">Upload</a>
-  <a href="reports.html" class="nav-link">Reports</a>
-  <a href="team.html" class="nav-link">About Us</a>
-  <a href="login.html" class="nav-link">Login</a>
-</nav>
 
+      <nav class="nav">
+        <a href="index.html" class="nav-link">Home</a>
+        <a href="upload.html" class="nav-link">Upload</a>
+        <a href="reports.html" class="nav-link">Reports</a>
+        <a href="team.html" class="nav-link">About Us</a>
+        <a href="login.html" class="nav-link">Login</a>
+      </nav>
     </div>
   </header>
 
   <!-- Main -->
   <main class="container narrow">
-    <section class="section-pad" aria-labelledby="upload-title">
-      <h1 id="upload-title" class="h-title">Upload</h1>
-      <p class="muted">Drag and drop a JPG/PNG and answer the questions below to get analysis results.</p>
+    <section class="section-pad">
+      <h1 class="h-title">Upload</h1>
+      <p class="muted">Drag and drop JPG/PNG files or click to browse.</p>
 
-      <!-- Dropzone -->
-      <div id="dz" class="dropzone" tabindex="0" aria-label="Image upload area">
-        <div class="dz-inner">
-          <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
-          <p class="dz-title">Drag &amp; drop your image here</p>
-          <p class="dz-sub">or click to browse</p>
-          <label class="file-btn" for="fileInput">Choose File
-            <input id="fileInput" type="file" accept="image/jpeg,image/png" />
-          </label>
-          <p class="q-hint">Tip: one clear lesion per image, good lighting, no heavy filters.</p>
-        </div>
+      <!-- DROPZONE -->
+      <div id="dz" class="dropzone card" tabindex="0" aria-label="Image upload area" 
+           style="padding:28px; text-align:center;">
+        <div style="font-size:2rem;">⬆️</div>
+        <p class="dz-title" style="font-weight:700; margin-top:8px;">Drag & drop your images here</p>
+        <p class="dz-sub" style="color:var(--muted)">or click to browse</p>
+
+        <label class="file-btn" style="margin-top:10px;">
+          Choose File
+          <input id="fileInput" type="file" accept="image/jpeg,image/png" multiple />
+        </label>
+
+        <p class="q-hint">Tip: Upload multiple images for comparison.</p>
       </div>
 
-      <!-- Preview -->
-      <div id="preview" class="preview" aria-live="polite" aria-atomic="true"></div>
+      <!-- MULTI-PREVIEW GRID -->
+      <div id="preview" class="preview" 
+           style="margin-top:16px; display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
+      </div>
 
-      <!-- Intake form -->
-      <form id="intakeForm" class="card" novalidate>
-        <h2 class="h-title" style="font-size:1.25rem; margin-top:0;">Patient Intake</h2>
+      <!-- FORM -->
+      <form id="intakeForm" class="card">
+        <h2 class="h-title" style="font-size:1.25rem;">Patient Intake</h2>
         <p class="section-sub">Required fields marked with <span class="req">*</span></p>
 
         <div class="q-grid">
           <div class="q-card">
-            <label class="q-label" for="name">Full Name <span class="req">*</span></label>
-            <input class="q-input" id="name" name="name" type="text" placeholder="e.g., Alex Johnson" required />
+            <label class="q-label">Full Name <span class="req">*</span></label>
+            <input class="q-input" id="name" required />
           </div>
 
           <div class="q-card">
-            <label class="q-label" for="age">Age <span class="req">*</span></label>
-            <input class="q-input" id="age" name="age" type="number" min="0" max="120" placeholder="e.g., 28" required />
+            <label class="q-label">Age <span class="req">*</span></label>
+            <input class="q-input" id="age" type="number" min="0" max="120" required />
           </div>
 
           <div class="q-card">
-            <label class="q-label" for="sex">Sex at Birth</label>
-            <select class="q-select" id="sex" name="sex">
+            <label class="q-label">Sex at Birth</label>
+            <select class="q-select" id="sex">
               <option value="">Prefer not to say</option>
               <option>Female</option>
               <option>Male</option>
@@ -100,112 +108,57 @@
           </div>
 
           <div class="q-card">
-            <label class="q-label" for="skinType">Skin Condition <span class="req">*</span></label>
-            <select class="q-select" id="skinType" name="skinType" required>
+            <label class="q-label">Skin Condition <span class="req">*</span></label>
+            <select class="q-select" id="skinType" required>
               <option value="">Select...</option>
-              <!-- Keeping your existing options/IDs for now -->
-              <option value="I">I — Very fair, always burns, never tans</option>
-              <option value="II">II — Fair, usually burns, tans minimally</option>
-              <option value="III">III — Medium, sometimes mild burn, tans uniformly</option>
-              <option value="IV">IV — Olive, rarely burns, tans well</option>
-              <option value="V">V — Brown, very rarely burns, tans easily</option>
-              <option value="VI">VI — Dark brown/black, never burns</option>
+              <option value="I">I — Very fair</option>
+              <option value="II">II — Fair</option>
+              <option value="III">III — Medium</option>
+              <option value="IV">IV — Olive</option>
+              <option value="V">V — Brown</option>
+              <option value="VI">VI — Dark brown</option>
             </select>
           </div>
 
           <div class="q-card">
-            <label class="q-label" for="location">Location <span class="req">*</span></label>
-            <input class="q-input" id="location" name="location" type="text" placeholder="e.g., Left forearm" required />
+            <label class="q-label">Location <span class="req">*</span></label>
+            <input class="q-input" id="location" required />
           </div>
 
           <div class="q-card">
-            <label class="q-label" for="duration">Duration (days) <span class="req">*</span></label>
-            <input class="q-input" id="duration" name="duration" type="number" min="0" max="3650" placeholder="e.g., 14" required />
+            <label class="q-label">Duration (days) <span class="req">*</span></label>
+            <input class="q-input" id="duration" type="number" min="0" max="3650" required />
           </div>
 
-          <div class="q-card">
-            <label class="q-label" for="symptom">Primary Symptom</label>
-            <select class="q-select" id="symptom" name="symptom">
-              <option value="">Select...</option>
-              <option>Itching</option>
-              <option>Pain</option>
-              <option>Bleeding</option>
-              <option>Crusting</option>
-              <option>Rapid growth</option>
-              <option>Color change</option>
-            </select>
-          </div>
-
-          <div class="q-card">
-            <label class="q-label" for="background">Family History (skin cancer / melanoma)</label>
-            <select class="q-select" id="background" name="background">
-              <option value="">Unknown / Prefer not to say</option>
-              <option>None</option>
-              <option>First-degree relative</option>
-              <option>Second-degree relative</option>
-            </select>
-          </div>
-
-          <div class="q-card">
-            <label class="q-label" for="sunExp">Typical Sun Exposure</label>
-            <select class="q-select" id="sunExp" name="sunExp">
-              <option value="">Select...</option>
-              <option>Low (mostly indoors)</option>
-              <option>Moderate</option>
-              <option>High (outdoors daily)</option>
-            </select>
-          </div>
-
-          <div class="q-card">
-            <label class="q-label" for="spf">Regular SPF Use</label>
-            <select class="q-select" id="spf" name="spf">
-              <option value="">Select...</option>
-              <option>Rarely/Never</option>
-              <option>Sometimes</option>
-              <option>Daily</option>
-            </select>
-          </div>
-
-          <div class="q-card">
-            <label class="q-label" for="meds">Current Medications</label>
-            <input class="q-input" id="meds" name="meds" type="text" placeholder="e.g., Isotretinoin" />
-          </div>
-
-          <div class="q-card" style="grid-column: 1 / -1;">
-            <label class="q-label" for="notes">Notes</label>
-            <textarea class="q-textarea" id="notes" name="notes" placeholder="Anything else we should know?"></textarea>
-          </div>
-
-          <div class="q-card" style="grid-column: 1 / -1;">
-            <label><input id="consent" type="checkbox" /> I confirm this image is mine or I have permission to upload it, and I consent to analysis. <span class="req">*</span></label>
+          <div class="q-card" style="grid-column:1/-1;">
+            <label>
+              <input id="consent" type="checkbox" /> I confirm this image is mine and consent to analysis. <span class="req">*</span>
+            </label>
           </div>
         </div>
 
         <div class="form-actions">
           <button id="analyzeBtn" class="btn btn-cta" type="submit" disabled>Analyze</button>
-          <button id="clearBtn" class="btn btn-secondary" type="button">Clear</button>
-          <span id="formMsg" class="q-hint" role="status" aria-live="polite"></span>
+          <button type="button" id="clearBtn" class="btn btn-secondary">Clear</button>
+          <span id="formMsg" class="q-hint"></span>
         </div>
       </form>
 
-      <!-- Results -->
-      <div id="resultCard" class="card result" aria-live="polite">
-        <h3 style="margin-top:0;">Preliminary Analysis (demo)</h3>
-        <p class="muted" id="resultMeta"></p>
+      <!-- RESULTS -->
+      <div id="resultCard" class="card result">
+        <h3>Preliminary Analysis (demo)</h3>
+        <p id="resultMeta" class="muted"></p>
         <div id="resultTags" style="margin-top:6px;"></div>
-        <hr style="border-color:#2a2a2a;">
-        <p>This is a front-end demo summary. Hook this form up to your back-end/ML endpoint to return real predictions.</p>
       </div>
     </section>
   </main>
 
-  <!-- Footer -->
-  <footer class="site-footer" role="contentinfo">
+  <!-- FOOTER -->
+  <footer class="site-footer">
     <div class="container">
-      <p class="footnote">© <span id="year"></span> SkinAI Classifier · Senior Capstone Project · For demonstration only.</p>
+      <p class="footnote">© <span id="year"></span> SkinAI Classifier</p>
     </div>
   </footer>
-  
 
   <script>
   // Footer year
@@ -362,23 +315,50 @@
     <span class="chat-label">Talk to AI Agent</span>
   </div>
 
-  <div id="chatbot-window">
-    <div id="chatbot-header">
-      <span>Talk to AI Agent</span>
-      <button id="chatbot-close">✕</button>
+  function validateForm() {
+    const required = ["name","age","skinType","location","duration"];
+    const ok = required.every(id => document.getElementById(id).value.trim() !== "")
+              && consent.checked
+              && selectedFiles.length > 0;
+
+    analyzeBtn.disabled = !ok;
+  }
+
+  document.getElementById("intakeForm").addEventListener("input", validateForm);
+  document.getElementById("intakeForm").addEventListener("change", validateForm);
+
+  /* ---------- CLEAR BUTTON ---------- */
+  document.getElementById("clearBtn").onclick = () => {
+    selectedFiles = [];
+    preview.innerHTML = "";
+    document.getElementById("intakeForm").reset();
+    analyzeBtn.disabled = true;
+  };
+</script>
+
+
+  <!-- CHATBOT -->
+  <div id="chatbot-widget">
+    <div id="chatbot-button">
+      <span class="chat-icon">💬</span>
+      <span class="chat-label">Talk to AI Agent</span>
     </div>
 
-    <div id="chatbot-messages"></div>
+    <div id="chatbot-window">
+      <div id="chatbot-header">
+        <span>Talk to AI Agent</span>
+        <button id="chatbot-close">✕</button>
+      </div>
 
-    <div id="chatbot-input-area">
-      <input id="chatbot-input" type="text" placeholder="Type your message…" />
-      <button id="chatbot-send">➤</button>
+      <div id="chatbot-messages"></div>
+
+      <div id="chatbot-input-area">
+        <input id="chatbot-input" type="text" placeholder="Type your message…" />
+        <button id="chatbot-send">➤</button>
+      </div>
     </div>
   </div>
-</div>
 
-
-<script src="chatbot.js"></script>
-
+  <script src="scripts/chatbot.js"></script>
 </body>
 </html>
