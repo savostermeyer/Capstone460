@@ -23,15 +23,13 @@
 # - Adds absolute image URLs in responses for convenience.
 
 
-
-
-
 import os
 import sys
 from typing import Dict
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 from expertSystem.chat import ConvState, step as chat_step
+
 
 # --- Project roots & import path setup ---
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -44,10 +42,15 @@ from query import search  # noqa: E402
 
 FRONT_DIR = os.path.join(ROOT, "front-end")
 DATA_DIR = os.path.join(ROOT, "data")
-EXP_DIR  = os.path.join(ROOT, "expertSystem")
+EXP_DIR = os.path.join(ROOT, "expertSystem")
 
 
 app = Flask(__name__, static_folder=FRONT_DIR, static_url_path="")
+
+from flask_cors import CORS
+
+CORS(app)
+
 
 def _strip_exif(img: Image.Image) -> Image.Image:
     try:
@@ -58,11 +61,14 @@ def _strip_exif(img: Image.Image) -> Image.Image:
     out.putdata(list(img.getdata()))
     return out
 
+
 @app.get("/")
 def index():
-    #  return send_from_directory(FRONT_DIR, "index.html")
-    # to run demo code:
-     return send_from_directory(EXP_DIR, "indexdemo.html")  # <- fixed indent
+    return send_from_directory(FRONT_DIR, "index.html")
+
+#   to run demo code:
+#   return send_from_directory(EXP_DIR, "indexdemo.html")  # <- fixed indent
+
 
 @app.get("/ham/<image_id>.jpg")
 def ham(image_id: str):
@@ -72,6 +78,7 @@ def ham(image_id: str):
         if os.path.exists(path):
             return send_from_directory(folder, f"{image_id}.jpg")
     return jsonify(error=f"{image_id} not found"), 404
+
 
 @app.post("/query")
 def do_query():
@@ -97,6 +104,7 @@ def do_query():
 
     return jsonify(out)
 
+
 # Serve other front-end files (about.html, upload.html, team.html, etc.)
 @app.get("/<path:path>")
 def static_pages(path):
@@ -111,11 +119,14 @@ def static_pages(path):
 # hold per-session state in memory for dev; switch to a store later
 _SESS: Dict[str, ConvState] = {}
 
+
 @app.post("/chat")
 def chat():
     try:
-        sid = request.args.get("sid", "demo")   # TODO: real session id later
+        sid = request.args.get("sid", "demo")  # TODO: real session id later
         st = _SESS.get(sid) or ConvState()
+
+        # read text and image from upload form
         user_text = request.form.get("text")
         img_file = request.files.get("image")
 
@@ -123,8 +134,18 @@ def chat():
         if img_file and img_file.filename:
             img = Image.open(img_file.stream).convert("RGB")
 
-        out = chat_step(st, user_text, img)
+        # capture all other metadata from the intake form
+        metadata = {k: v for k, v in request.form.items() if k not in ("text",)}
+        print("[UPLOAD] Metadata received:", metadata)
+        print("[UPLOAD] Text:", user_text)
+        print("[UPLOAD] Image received", bool(img))
+
+        #   call AI logic
+        out = chat_step(st, user_text, img, metadata)
         _SESS[sid] = st
+
+        # add absolute URLs for any image results
+        out["metadata"] = metadata
 
         # add absolute URLs for any image results
         base = request.host_url.rstrip("/")
@@ -140,10 +161,15 @@ def chat():
     except Exception as e:
         # Log full traceback to console for debugging
         import traceback
+
         traceback.print_exc()
         msg = f"Server error: {e}"
         # Keep 200 so the frontend can render the message in the chat bubble
-        return jsonify({"reply": msg, "message": msg, "assistant": msg, "text": msg}), 200
+        return (
+            jsonify({"reply": msg, "message": msg, "assistant": msg, "text": msg}),
+            200,
+        )
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "3720"))

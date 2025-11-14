@@ -301,11 +301,49 @@
 
       document.getElementById('resultCard').classList.add('show');
 
-      // Example backend hook:
-      // const formData = new FormData();
-      // formData.append('image', selectedFile);
-      // Object.entries(data).forEach(([k,v]) => formData.append(k, v));
-      // fetch('/api/analyze', { method:'POST', body: formData }).then(...)
+      // Send to Flask backend 
+      const formData = new FormData();
+      formData.append('image', selectedFile)
+
+      //combine text + image data
+      Object.entries(data).forEach(([k,v])=> formData.append(k,v));
+
+      //show loading message
+      formMsg.textContent = "Analyzing image...";
+      analyzeBtn.disabled = true;
+
+      fetch('http://127.0.0.1:3720/chat', {
+        method: 'POST',
+        body: formData  
+      })
+        .then(res => res.json())
+        .then(json => {
+          console.log("Server response:", json);
+          formMsg.textContent = "Analysis complete!";
+          analyzeBtn.disabled = false;
+
+          // Format later to have a better response
+          document.getElementById('resultCard').classList.add('show');
+          document.getElementById('resultMeta').textContent = 
+          `${data.name || 'Patient'}, age ${data.age} - ${json.reply || 'AI processed successfully.'}`;
+
+          // add backend results (if any)
+          const tags = document.getElementById('resultTags');
+          tags.innerHTML = '';
+          if(json.results && Array.isArray(json.results)){
+            json.results.forEach(r => {
+              const pill = document.createElement('span');
+              pill.className = 'pill';
+              pill.textContent = r.label || r.prediction || JSON.stringify(r);
+              tags.appendChild(pill);
+            })
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          formMsg.textContent ="Error connecting to backend.";
+          analyzeBtn.disabled = false;
+        })
     });
 
     clearBtn.addEventListener('click', () => {
