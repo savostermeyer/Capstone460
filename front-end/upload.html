@@ -58,19 +58,11 @@
       <p class="muted">Drag and drop a JPG/PNG and answer the questions below to get analysis results.</p>
 
       <!-- Dropzone -->
-<<<<<<< HEAD
-      <div id="dropzone" class="dropzone" tabindex="0" aria-label="Image upload area">
-        <div class="dropzone-inner">
-          <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
-          <p class="dropzone-title">Drag &amp; drop your image here</p>
-          <p class="dropzone-sub">or click to browse</p>
-=======
       <div id="dz" class="dropzone" tabindex="0" aria-label="Image upload area">
         <div class="dz-inner">
           <div style="font-size:2rem; text-align:center; line-height:1;">⬆️</div>
           <p class="dz-title">Drag &amp; drop your image here</p>
           <p class="dz-sub">or click to browse</p>
->>>>>>> ec3f946616f8d85fc8163121ce3b1a357a77c25e
           <label class="file-btn" for="fileInput">Choose File
             <input id="fileInput" type="file" accept="image/jpeg,image/png" />
           </label>
@@ -216,168 +208,152 @@
   
 
   <script>
-    // Footer year
-    document.getElementById('year').textContent = new Date().getFullYear();
+  // Footer year
+  document.getElementById('year').textContent = new Date().getFullYear();
 
-    // --- Upload + preview ---
-<<<<<<< HEAD
-    const dropzone = document.getElementById('dropzone');
-=======
-    const dz = document.getElementById('dz');
->>>>>>> ec3f946616f8d85fc8163121ce3b1a357a77c25e
-    const fileInput = document.getElementById('fileInput');
-    const preview = document.getElementById('preview');
-    let selectedFile = null;
+  /* --- Upload + preview --- */
+  const dz = document.getElementById('dz');
+  const fileInput = document.getElementById('fileInput');
+  const preview = document.getElementById('preview');
+  let selectedFile = null;
 
-    const prevent = e => { e.preventDefault(); e.stopPropagation(); };
-<<<<<<< HEAD
-    ['dragenter','dragover','dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, prevent));
-    dropzone.addEventListener('dragover', () => dropzone.style.outline = '2px solid var(--gold)');
-    dropzone.addEventListener('dragleave', () => dropzone.style.outline = '');
-    dropzone.addEventListener('drop', (e) => {
-      dropzone.style.outline = '';
-      const f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) { handleFile(f); }
-    });
-    dropzone.addEventListener('click', () => fileInput.click());
-=======
-    ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
-    dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
-    dz.addEventListener('dragleave', () => dz.style.outline = '');
-    dz.addEventListener('drop', (e) => {
-      dz.style.outline = '';
-      const f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) { handleFile(f); }
-    });
-    dz.addEventListener('click', () => fileInput.click());
->>>>>>> ec3f946616f8d85fc8163121ce3b1a357a77c25e
-    fileInput.addEventListener('change', (e) => {
-      const f = e.target.files && e.target.files[0];
-      if (f) { handleFile(f); }
-    });
+  const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+  ['dragenter','dragover','dragleave','drop'].forEach(evt => dz.addEventListener(evt, prevent));
+  dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
+  dz.addEventListener('dragleave', () => dz.style.outline = '');
+  dz.addEventListener('drop', (e) => {
+    dz.style.outline = '';
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+  dz.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) handleFile(f);
+  });
 
-    function handleFile(file){
-      if(!/image\/(jpeg|png)/.test(file.type)){ alert('Please upload a JPG or PNG.'); return; }
-      selectedFile = file;
-      const url = URL.createObjectURL(file);
-      preview.innerHTML = '';
-      const img = document.createElement('img');
-      img.src = url; img.alt = 'Uploaded image preview';
-      preview.appendChild(img);
-      validateForm();
+  function handleFile(file){
+    if(!/image\/(jpeg|png)/.test(file.type)){
+      alert('Please upload a JPG or PNG.');
+      return;
     }
+    selectedFile = file;
+    const url = URL.createObjectURL(file);
+    preview.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = 'Uploaded image preview';
+    preview.appendChild(img);
+    validateForm();
+  }
 
-    // --- Form validation & submit (demo) ---
-    const form = document.getElementById('intakeForm');
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    const clearBtn = document.getElementById('clearBtn');
-    const consent = document.getElementById('consent');
-    const formMsg = document.getElementById('formMsg');
+  /* --- Form validation --- */
+  const form = document.getElementById('intakeForm');
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const consent = document.getElementById('consent');
+  const formMsg = document.getElementById('formMsg');
 
-    function validateForm(){
-      const requiredIds = ['name','age','skinType','location','duration'];
-      const allFilled = requiredIds.every(id => document.getElementById(id).value.trim() !== '');
-      const ok = !!selectedFile && consent.checked && allFilled;
-      analyzeBtn.disabled = !ok;
-      formMsg.textContent = ok ? '' : 'Upload an image, fill required fields, and give consent.';
-    }
-    form.addEventListener('input', validateForm);
-    form.addEventListener('change', validateForm);
+  function validateForm(){
+    const requiredIds = ['name','age','skinType','location','duration'];
+    const allFilled = requiredIds.every(id => document.getElementById(id).value.trim() !== '');
+    const ok = !!selectedFile && consent.checked && allFilled;
+    analyzeBtn.disabled = !ok;
+    formMsg.textContent = ok ? '' : 'Upload an image, fill required fields, and give consent.';
+  }
 
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      if (analyzeBtn.disabled) return;
+  form.addEventListener('input', validateForm);
+  form.addEventListener('change', validateForm);
 
-      const data = {
-        name: document.getElementById('name').value.trim(),
-        age: +document.getElementById('age').value,
-        sex: document.getElementById('sex').value,
-        fitzpatrick: document.getElementById('skinType').value, // keeping existing key
-        location: document.getElementById('location').value.trim(),
-        duration_days: +document.getElementById('duration').value,
-        symptom: document.getElementById('symptom').value,
-        family_history: document.getElementById('background').value,
-        sun_exposure: document.getElementById('sunExp').value,
-        spf: document.getElementById('spf').value,
-        meds: document.getElementById('meds').value.trim(),
-        notes: document.getElementById('notes').value.trim(),
-      };
+  /* --- Submit to backend --- */
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (analyzeBtn.disabled) return;
 
-      // Updated summary text
+    const data = {
+      name: document.getElementById('name').value.trim(),
+      age: +document.getElementById('age').value,
+      sex: document.getElementById('sex').value,
+      fitzpatrick: document.getElementById('skinType').value,
+      location: document.getElementById('location').value.trim(),
+      duration_days: +document.getElementById('duration').value,
+      symptom: document.getElementById('symptom').value,
+      family_history: document.getElementById('background').value,
+      sun_exposure: document.getElementById('sunExp').value,
+      spf: document.getElementById('spf').value,
+      meds: document.getElementById('meds').value.trim(),
+      notes: document.getElementById('notes').value.trim(),
+    };
+
+    const tags = document.getElementById('resultTags');
+    tags.innerHTML = '';
+
+    [
+      data.sex && `Sex: ${data.sex}`,
+      data.symptom && `Symptom: ${data.symptom}`,
+      data.family_history && `Family hx: ${data.family_history}`,
+      data.sun_exposure && `Sun exposure: ${data.sun_exposure}`,
+      data.spf && `SPF: ${data.spf}`,
+      data.meds && `Meds: ${data.meds}`
+    ]
+    .filter(Boolean)
+    .forEach(t => {
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.textContent = t;
+      tags.appendChild(pill);
+    });
+
+    document.getElementById('resultCard').classList.add('show');
+
+    const formData = new FormData();
+    formData.append('image', selectedFile);
+
+    Object.entries(data).forEach(([k,v]) => formData.append(k,v));
+
+    formMsg.textContent = "Analyzing image...";
+    analyzeBtn.disabled = true;
+
+    fetch('http://127.0.0.1:3720/chat', {
+      method: 'POST',
+      body: formData
+    })
+    .then(res => res.json())
+    .then(json => {
+      console.log("Server response:", json);
+      formMsg.textContent = "Analysis complete!";
+      analyzeBtn.disabled = false;
+
       document.getElementById('resultMeta').textContent =
-        `${data.name || 'Patient'}, age ${data.age} — Skin condition: ${data.fitzpatrick} — Location: ${data.location}, ${data.duration_days} day(s).`;
+        `${data.name || 'Patient'}, age ${data.age} — ${json.reply || 'AI processed successfully.'}`;
 
-      const tags = document.getElementById('resultTags');
       tags.innerHTML = '';
-      [
-        data.sex && `Sex: ${data.sex}`,
-        data.symptom && `Symptom: ${data.symptom}`,
-        data.family_history && `Family hx: ${data.family_history}`,
-        data.sun_exposure && `Sun exposure: ${data.sun_exposure}`,
-        data.spf && `SPF: ${data.spf}`,
-        data.meds && `Meds: ${data.meds}`
-      ].filter(Boolean).forEach(t => {
-        const pill = document.createElement('span');
-        pill.className = 'pill';
-        pill.textContent = t;
-        tags.appendChild(pill);
-      });
 
-      document.getElementById('resultCard').classList.add('show');
-
-      // Send to Flask backend 
-      const formData = new FormData();
-      formData.append('image', selectedFile)
-
-      //combine text + image data
-      Object.entries(data).forEach(([k,v])=> formData.append(k,v));
-
-      //show loading message
-      formMsg.textContent = "Analyzing image...";
-      analyzeBtn.disabled = true;
-
-      fetch('http://127.0.0.1:3720/chat', {
-        method: 'POST',
-        body: formData  
-      })
-        .then(res => res.json())
-        .then(json => {
-          console.log("Server response:", json);
-          formMsg.textContent = "Analysis complete!";
-          analyzeBtn.disabled = false;
-
-          // Format later to have a better response
-          document.getElementById('resultCard').classList.add('show');
-          document.getElementById('resultMeta').textContent = 
-          `${data.name || 'Patient'}, age ${data.age} - ${json.reply || 'AI processed successfully.'}`;
-
-          // add backend results (if any)
-          const tags = document.getElementById('resultTags');
-          tags.innerHTML = '';
-          if(json.results && Array.isArray(json.results)){
-            json.results.forEach(r => {
-              const pill = document.createElement('span');
-              pill.className = 'pill';
-              pill.textContent = r.label || r.prediction || JSON.stringify(r);
-              tags.appendChild(pill);
-            })
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          formMsg.textContent ="Error connecting to backend.";
-          analyzeBtn.disabled = false;
-        })
+      if (json.results && Array.isArray(json.results)){
+        json.results.forEach(r => {
+          const pill = document.createElement('span');
+          pill.className = 'pill';
+          pill.textContent = r.label || r.prediction || JSON.stringify(r);
+          tags.appendChild(pill);
+        });
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      formMsg.textContent ="Error connecting to backend.";
+      analyzeBtn.disabled = false;
     });
+  });
 
-    clearBtn.addEventListener('click', () => {
-      form.reset();
-      preview.innerHTML = '';
-      selectedFile = null;
-      document.getElementById('resultCard').classList.remove('show');
-      validateForm();
-    });
-  </script>
+  clearBtn.addEventListener('click', () => {
+    form.reset();
+    preview.innerHTML = '';
+    selectedFile = null;
+    document.getElementById('resultCard').classList.remove('show');
+    validateForm();
+  });
+</script>
+
 
 <!-- Floating Chatbot Widget -->
 <div id="chatbot-widget">
@@ -401,6 +377,8 @@
   </div>
 </div>
 
+
+<script src="chatbot.js"></script>
 
 </body>
 </html>
