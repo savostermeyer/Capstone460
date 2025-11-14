@@ -42,18 +42,35 @@
 ## 🔧 Requirements
 - **Python:** 3.13.5
 - **Packages (chat only):**
-  - `flask`
-  - `python-dotenv`
-  - `google-generativeai`
-  - `pillow`
-  - `numpy`
-  - `pandas`
+  # Flask (web server)
+pip install flask
+
+# Flask-CORS (CORS support for frontend→backend)
+pip install flask-cors
+
+# python-dotenv (load .env variables)
+pip install python-dotenv
+
+# Google Gemini SDK
+pip install google-generativeai
+
+# Pillow (image handling)
+pip install pillow
+
+# NumPy (array support)
+pip install numpy
+
+# Pandas (data structures — optional but included)
+pip install pandas
+
 
 ### Quick install
 ```bat
 python -m venv venv
 venv\Scripts\activate
 python -m pip install --upgrade pip
+
+downlaod all commmand
 python -m pip install flask python-dotenv google-generativeai pillow numpy pandas
 ```
 
