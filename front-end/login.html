@@ -127,4 +127,31 @@
     });
   </script>
 </body>
+
+<!-- Floating Chatbot Widget -->
+<div id="chatbot-widget">
+  <div id="chatbot-button">
+    <span class="chat-icon">💬</span>
+    <span class="chat-label">Talk to AI Agent</span>
+  </div>
+
+  <div id="chatbot-window">
+    <div id="chatbot-header">
+      <span>Talk to AI Agent</span>
+      <button id="chatbot-close">✕</button>
+    </div>
+
+    <div id="chatbot-messages"></div>
+
+    <div id="chatbot-input-area">
+      <input id="chatbot-input" type="text" placeholder="Type your message…" />
+      <button id="chatbot-send">➤</button>
+    </div>
+  </div>
+</div>
+
+
+
+<script src="scripts/chatbot.js"></script>
+
 </html>
