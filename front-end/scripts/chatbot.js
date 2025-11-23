@@ -5,16 +5,48 @@ const chatMessages = document.getElementById("chatbot-messages");
 const chatInput = document.getElementById("chatbot-input");
 const chatSend = document.getElementById("chatbot-send");
 
-// Backend
-const BACKEND_URL = "http://127.0.0.1:3720/chat?sid=demo";
+// Session ID
+let sid = localStorage.getItem("skinai_sid")
+if(!sid) {
+  sid = "sid_" + Math.random().toString(36).substring(2);
+  localStorage.setItem("skinai_sid", sid);
+}
+
+//Restore chat open state
+let chatOpenState = localStorage.getItem("skinai_chat_open") || "false";
+if (chatOpenState === "true"){
+  chatWindow.style.display = "flex";
+}
+
+// Backend  <-- MUST BE let, not const (so reset can update it)
+let BACKEND_URL = `http://127.0.0.1:3720/chat?sid=${sid}`;
+
+// Show chat history
+let savedHistory = JSON.parse(localStorage.getItem("skinai_chat_history") || "[]");
+
+function renderHistory(){
+  chatMessages.innerHTML = "";
+  savedHistory.forEach(msg =>{
+    const div = document.createElement("div");
+    div.className = `chatbot-msg ${msg.type}`;
+    div.textContent = msg.text;  
+    chatMessages.appendChild(div);
+  });
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+renderHistory(); 
 
 // UI open/close
 chatButton.addEventListener("click", () => {
   chatWindow.style.display = "flex";
+  localStorage.setItem("skinai_chat_open", "true");
+  renderHistory(); // reload saved messages
 });
 
 chatClose.addEventListener("click", () => {
   chatWindow.style.display = "none";
+  localStorage.setItem("skinai_chat_open", "false");
 });
 
 // Input handlers
@@ -24,12 +56,56 @@ chatInput.addEventListener("keypress", e => {
 });
 
 function addMessage(text, type) {
+
+  // Save to localStorage
+  savedHistory.push({ text, type });
+  localStorage.setItem("skinai_chat_history", JSON.stringify(savedHistory));
+
+  // Add to UI
   const div = document.createElement("div");
   div.className = `chatbot-msg ${type}`;
   div.textContent = text;
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
+
+// Make addMessage available for upload.html
+window.addMessage = addMessage;
+
+
+// ------------------------------------
+// RESET CHAT FUNCTION (new)
+// ------------------------------------
+
+// RESET button (↺)
+const chatReset = document.getElementById("chatbot-reset");
+
+chatReset.addEventListener("click", () => {
+  // 1. Clear UI messages
+  chatMessages.innerHTML = "";
+
+  // 2. Clear saved history
+  localStorage.removeItem("skinai_chat_history");
+  savedHistory = []; // local copy also cleared
+
+  // 3. Generate a NEW SID so AI conversation resets
+  const newSid = "sid_" + Math.random().toString(36).substring(2);
+  localStorage.setItem("skinai_sid", newSid);
+
+  // 4. Update backend URL immediately
+  BACKEND_URL = `http://127.0.0.1:3720/chat?sid=${newSid}`;
+
+  // 5. Confirm to user
+  const div = document.createElement("div");
+  div.className = "chatbot-msg bot";
+  div.textContent = "🔄 Chat reset. You can start a new conversation.";
+  chatMessages.appendChild(div);
+});
+
+
+// ------------------------------------
+// SEND MESSAGE TO BACKEND
+// ------------------------------------
 
 async function sendMessage() {
   const text = chatInput.value.trim();
