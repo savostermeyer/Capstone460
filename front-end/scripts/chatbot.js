@@ -37,6 +37,14 @@ function renderHistory(){
 
 renderHistory(); 
 
+//if history is empty
+if(savedHistory.length === 0){
+  addMessage(
+    "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis. " , 
+    "bot"
+  );
+}
+
 // UI open/close
 chatButton.addEventListener("click", () => {
   chatWindow.style.display = "flex";
