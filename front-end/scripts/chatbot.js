@@ -21,6 +21,9 @@ if (chatOpenState === "true"){
 // Backend  <-- MUST BE let, not const (so reset can update it)
 let BACKEND_URL = `http://127.0.0.1:3720/chat?sid=${sid}`;
 
+// 🔥 EXPOSE to upload.html
+window.BACKEND_URL = BACKEND_URL;
+
 // Show chat history
 let savedHistory = JSON.parse(localStorage.getItem("skinai_chat_history") || "[]");
 
@@ -80,7 +83,6 @@ function addMessage(text, type) {
 // Make addMessage available for upload.html
 window.addMessage = addMessage;
 
-
 // ------------------------------------
 // RESET CHAT FUNCTION (new)
 // ------------------------------------
@@ -89,27 +91,21 @@ window.addMessage = addMessage;
 const chatReset = document.getElementById("chatbot-reset");
 
 chatReset.addEventListener("click", () => {
-  // 1. Clear UI messages
   chatMessages.innerHTML = "";
-
-  // 2. Clear saved history
   localStorage.removeItem("skinai_chat_history");
-  savedHistory = []; // local copy also cleared
+  savedHistory = [];
 
-  // 3. Generate a NEW SID so AI conversation resets
   const newSid = "sid_" + Math.random().toString(36).substring(2);
   localStorage.setItem("skinai_sid", newSid);
 
-  // 4. Update backend URL immediately
   BACKEND_URL = `http://127.0.0.1:3720/chat?sid=${newSid}`;
+  window.BACKEND_URL = BACKEND_URL;
 
-  // 5. Confirm to user
   const div = document.createElement("div");
   div.className = "chatbot-msg bot";
   div.textContent = "🔄 Chat reset. You can start a new conversation.";
   chatMessages.appendChild(div);
 });
-
 
 // ------------------------------------
 // SEND MESSAGE TO BACKEND
@@ -119,11 +115,9 @@ async function sendMessage() {
   const text = chatInput.value.trim();
   if (!text) return;
 
-  // Show user bubble
   addMessage(text, "user");
   chatInput.value = "";
 
-  // Build request
   const formData = new FormData();
   formData.append("text", text);
 
