@@ -206,6 +206,7 @@ def _get_model():
     raise RuntimeError(f"No working Gemini model from {CANDIDATES}. Last error: {last_err}")
 
 # ---- Rule stub (replace with your expert system) ----
+# this is where the medical logic lives
 def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
     score = 0.0
     reasons = []
@@ -330,22 +331,37 @@ def _resp_text(resp) -> str:
 # ---- Main step ----
 def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dict[str,Any]]=None) -> Dict[str, Any]:
     
-    # Merge metadata into AI input(provided from upload.html)
-    
-    summary_text =""
+    # --- NEW: parse classifier_probs (coming later from CNN team) ---
+    # Accept JSON string or dict. If it's invalid, ignore safely.
+    if metadata and "classifier_probs" in metadata:
+        raw = metadata["classifier_probs"]
+        if isinstance(raw, str):
+            try:
+                metadata["classifier_probs"] = json.loads(raw)
+            except Exception:
+                metadata["classifier_probs"] = {}  # fail-safe
+
+    # Merge metadata into AI input (provided from upload.html)
+    summary_text = ""
+
     if metadata:
         parts = []
         
         if metadata.get("name"):
             parts.append(f"Patient: {metadata['name']}")
+            
         if metadata.get("age"):
-            parts.append(f"Age: {metadata['age']}")
+            parts.append(f"Age: {metadata['page']}")
+            
         if metadata.get("fitzpatrick"):
             parts.append(f"Skin type: {metadata['fitzpatrick']}")
-        if metadata.get("location"):
-            parts.append(f"Lesion location: {metadata['location']}")
+            
+        if metadata.get("body_site"):
+            parts.append(f"Lesion location: {metadata['body_site']}")
+            
         if metadata.get("duration_days"):
             parts.append(f"Duration: {metadata['duration_days']} day(s)")
+            
         if metadata.get("symptom"):
             parts.append(f"Main symptom: {metadata['symptom']}")
             
