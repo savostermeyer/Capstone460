@@ -1,121 +1,154 @@
-    document.getElementById('year').textContent = new Date().getFullYear();
+document.getElementById('year').textContent = new Date().getFullYear();
 
-    const dz = document.getElementById('dz');
-    const fileInput = document.getElementById('fileInput');
-    const preview = document.getElementById('preview');
+const dz = document.getElementById('dz');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const form = document.getElementById("intakeForm");
+const analyzeBtn = document.getElementById("analyzeBtn");
+const clearBtn = document.getElementById("clearBtn");
+const formMsg = document.getElementById("formMsg");
 
-    let selectedFiles = [];
-    let justDropped = false;
+let selectedFiles = [];
+let justDropped = false;
 
-    const prevent = e => { e.preventDefault(); e.stopPropagation(); };
-    ['dragenter','dragover','dragleave','drop'].forEach(evt =>
-      dz.addEventListener(evt, prevent)
-    );
+// -------------------------
+// DRAG + DROP
+// -------------------------
+const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+['dragenter','dragover','dragleave','drop'].forEach(evt =>
+  dz.addEventListener(evt, prevent)
+);
 
-    dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
-    dz.addEventListener('dragleave', () => dz.style.outline = '');
+dz.addEventListener('dragover', () => dz.style.outline = '2px solid var(--gold)');
+dz.addEventListener('dragleave', () => dz.style.outline = '');
 
-    dz.addEventListener('drop', e => {
-      dz.style.outline = '';
-      justDropped = true;
+dz.addEventListener('drop', e => {
+  dz.style.outline = '';
+  justDropped = true;
 
-      const files = [...e.dataTransfer.files].filter(f =>
-        /image\/(jpeg|png)/.test(f.type)
-      );
-      if (files.length) handleFiles(files);
-    });
+  const files = [...e.dataTransfer.files].filter(f =>
+    /image\/(jpeg|png)/.test(f.type)
+  );
+  if (files.length) handleFiles(files);
+  validateForm();
+});
 
-    // prevent double-opening
-    dz.addEventListener('click', (e) => {
-      if (e.target.tagName === "LABEL" || e.target.tagName === "INPUT") return;
-      if (justDropped) { justDropped = false; return; }
-      fileInput.click();
-    });
+// block double-click
+dz.addEventListener('click', (e) => {
+  if (e.target.tagName === "LABEL" || e.target.tagName === "INPUT") return;
+  if (justDropped) { justDropped = false; return; }
+  fileInput.click();
+});
 
-    fileInput.addEventListener('change', e => {
-      const files = [...e.target.files].filter(f =>
-        /image\/(jpeg|png)/.test(f.type)
-      );
-      if (files.length) handleFiles(files);
-    });
+fileInput.addEventListener('change', e => {
+  const files = [...e.target.files].filter(f =>
+    /image\/(jpeg|png)/.test(f.type)
+  );
+  if (files.length) handleFiles(files);
+  validateForm();
+});
 
-    function handleFiles(files) {
-      selectedFiles = [...selectedFiles, ...files];
-      preview.innerHTML = "";
+// -------------------------
+// PREVIEW HANDLER
+// -------------------------
+function handleFiles(files) {
+  selectedFiles = [...files];
+  preview.innerHTML = "";
 
-      selectedFiles.forEach((file, index) => {
-        const url = URL.createObjectURL(file);
-        const wrap = document.createElement("div");
-        wrap.style.position = "relative";
+  selectedFiles.forEach((file) => {
+    const url = URL.createObjectURL(file);
+    const wrap = document.createElement("div");
+    wrap.style.position = "relative";
 
-        const img = document.createElement("img");
-        img.src = url;
+    const img = document.createElement("img");
+    img.src = url;
 
-        const del = document.createElement("button");
-        del.textContent = "✕";
-        del.style.position = "absolute";
-        del.style.top = "6px";
-        del.style.right = "6px";
-        del.style.background = "rgba(0,0,0,0.7)";
-        del.style.color = "white";
-        del.style.border = "none";
-        del.style.padding = "2px 6px";
-        del.style.cursor = "pointer";
-        del.style.borderRadius = "4px";
-
-        del.onclick = () => {
-          selectedFiles.splice(index, 1);
-          handleFiles([]);
-        };
-
-        wrap.appendChild(img);
-        wrap.appendChild(del);
-        preview.appendChild(wrap);
-      });
-    }
-function sendUploadToChat(imageFile, formDataObject) {
-    const fd = new FormData();
-
-    // only attach the image if one exists
-    if (imageFile) {
-        fd.append("image", imageFile);
-    }
-
-    // attach metadata properly
-    Object.entries(formDataObject).forEach(([k, v]) => {
-        fd.append(k, v);
-    });
-
-    fetch(BACKEND_URL, { method: "POST", body: fd })
-        .then(r => r.json())
-        .then(data => {
-            addMessage(data.reply, "bot");
-        })
-        .catch(err => addMessage("Error sending upload.", "bot"));
+    wrap.appendChild(img);
+    preview.appendChild(wrap);
+  });
 }
 
-document.getElementById("intakeForm").addEventListener("submit", function (e) {
-    e.preventDefault();
+// -------------------------
+// FORM VALIDATION
+// -------------------------
+function validateForm() {
+  const requiredIds = ["name", "age", "skinType", "location", "duration"];
+  const allFilled = requiredIds.every(id => document.getElementById(id).value.trim() !== "");
 
-    let imageFile = null;
-    if (selectedFiles.length > 0) {
-        imageFile = selectedFiles[0];
-    }
+  const consent = document.getElementById("consent").checked;
+  const ok = allFilled && consent && selectedFiles.length > 0;
 
-    const metadata = {
-        name: document.getElementById("name").value,
-        age: document.getElementById("age").value,
-        sex: document.getElementById("sex").value,
-        fitzpatrick: document.getElementById("skinType").value,
-        body_site: document.getElementById("location").value,
-        duration_days: document.getElementById("duration").value,
-        consent: document.getElementById("consent").checked
-    };
+  analyzeBtn.disabled = !ok;
+  formMsg.textContent = ok ? "" : "Upload an image, fill required fields, and give consent.";
+}
 
-    addMessage("Analyzing your uploaded image…", "bot");
+form.addEventListener("input", validateForm);
+form.addEventListener("change", validateForm);
 
-    sendUploadToChat(imageFile, metadata);
+// -------------------------
+// SEND TO CHATBOT
+// -------------------------
+function sendUploadToChat(imageFile, formDataObject) {
+  const fd = new FormData();
 
-    chatWindow.style.display = "flex";
-    localStorage.setItem("skinai_chat_open", "true");
+  if (imageFile) {
+    fd.append("image", imageFile);
+  }
+
+  Object.entries(formDataObject).forEach(([k, v]) => {
+    fd.append(k, v);
+  });
+
+  fetch(BACKEND_URL, { method: "POST", body: fd })
+    .then(r => r.json())
+    .then(data => {
+      addMessage(data.reply, "bot");
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = "Analyze";
+    })
+    .catch(() => addMessage("Error sending upload.", "bot"));
+}
+
+// -------------------------
+// SUBMIT HANDLER
+// -------------------------
+form.addEventListener("submit", function (e) {
+  e.preventDefault();
+  if (analyzeBtn.disabled) return;
+
+  analyzeBtn.textContent = "Analyzing…";
+  analyzeBtn.disabled = true;
+
+  let imageFile = null;
+  if (selectedFiles.length > 0) imageFile = selectedFiles[0];
+
+  const metadata = {
+    name: document.getElementById("name").value,
+    age: document.getElementById("age").value,
+    sex: document.getElementById("sex").value,
+    fitzpatrick: document.getElementById("skinType").value,
+    body_site: document.getElementById("location").value,
+    duration_days: document.getElementById("duration").value,
+    consent: document.getElementById("consent").checked
+  };
+
+  addMessage("Analyzing your uploaded image…", "bot");
+
+  sendUploadToChat(imageFile, metadata);
+
+  chatWindow.style.display = "flex";
+  localStorage.setItem("skinai_chat_open", "true");
+});
+
+// -------------------------
+// CLEAR BUTTON
+// -------------------------
+clearBtn.addEventListener("click", () => {
+  form.reset();
+  preview.innerHTML = "";
+  selectedFiles = [];
+  analyzeBtn.disabled = true;
+  formMsg.textContent = "";
+
+  validateForm();
 });
