@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SkinAI Classifier — Account</title>
+
+  <link rel="stylesheet" href="styles/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Header / Nav -->
+  <header class="site-header" role="banner">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
+        <div class="brand-mark" aria-hidden="true">AI</div>
+        <div class="brand-text">
+          <strong>SkinAI Classifier</strong>
+          <span>Purdue University</span>
+        </div>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html"  class="nav-link" data-page="index.html">Home</a>
+        <a href="upload.html" class="nav-link" data-page="upload.html">Upload</a>
+        <a href="reports.html" class="nav-link" data-page="reports.html">Reports</a>
+        <a href="about.html"   class="nav-link" data-page="about.html">About Us</a>
+        <!-- This starts as Login; app.js will turn it into Account + link to account.html when logged in -->
+        <a href="login.html"   class="nav-link js-login-link" data-page="login.html">Login</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="container narrow">
+    <section class="section-pad" aria-labelledby="account-title">
+      <h1 id="account-title" class="h-title">Account</h1>
+      <p class="muted">
+        Manage your profile and see a quick summary of how you’re using SkinAI Classifier.
+      </p>
+
+      <!-- Basic profile card -->
+      <div class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Profile</h2>
+        <p class="muted" style="margin-top:4px;">
+          Signed in as <strong id="acct-email">(loading…)</strong>
+        </p>
+
+        <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:12px;">
+          <div style="min-width:220px;">
+            <h3 style="margin:0 0 4px 0;">Role</h3>
+            <p class="muted" style="margin:0 0 8px 0;">
+              Choose how you’re using this tool.
+            </p>
+
+            <label style="display:block;margin-bottom:6px;">
+              <input type="radio" name="acct-role" value="patient" id="role-patient">
+              Patient / General user
+            </label>
+            <label style="display:block;margin-bottom:6px;">
+              <input type="radio" name="acct-role" value="doctor" id="role-doctor">
+              Doctor / Medical professional
+            </label>
+
+            <p class="muted" id="role-msg" style="margin-top:8px;font-size:.9rem;"></p>
+          </div>
+
+          <div style="min-width:220px;">
+            <h3 style="margin:0 0 4px 0;">Usage snapshot</h3>
+            <ul class="muted" style="margin:0;padding-left:18px;">
+              <li>Total saved reports: <strong id="acct-report-count">0</strong></li>
+              <li>Most recent report: <strong id="acct-last-report">None</strong></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions card -->
+      <div class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Account actions</h2>
+        <p class="muted" style="margin-top:4px;">
+          Quick links for common actions.
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;">
+          <button id="acct-go-reports" class="btn">View my reports</button>
+          <button id="acct-go-upload" class="btn">Upload a new image</button>
+          <button id="acct-signout" class="btn">Sign out</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer" role="contentinfo">
+    <div class="container">
+      <p class="footnote">
+        © <span id="year"></span> SkinAI Classifier · Senior Capstone Project · For demonstration only.
+      </p>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="scripts/app.js"></script>
+  <script src="scripts/account.js"></script>
+</body>
+</html>
