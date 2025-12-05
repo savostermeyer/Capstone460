@@ -3,58 +3,119 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SkinAI Classifier — About</title>
+  <title>SkinAI Classifier — About Us</title>
+
+  <!-- Global Styles + Fonts -->
   <link rel="stylesheet" href="styles/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap"
+    rel="stylesheet"
+  >
 </head>
+
 <body>
-  <header class="site-header">
+
+  <!-- Header -->
+  <header class="site-header" role="banner">
     <div class="container header-inner">
-      <a class="brand" href="index.html">
+      <a class="brand" href="index.html" aria-label="SkinAI Classifier Home">
         <div class="brand-mark">AI</div>
         <div class="brand-text">
           <strong>SkinAI Classifier</strong>
           <span>Purdue University</span>
         </div>
       </a>
-      <nav class="nav" aria-label="Primary">
-  <a href="index.html"  class="nav-link" data-page="index.html">Home</a>
-  <a href="upload.html"  class="nav-link" data-page="upload.html">Upload</a>
-  <a href="reports.html" class="nav-link" data-page="reports.html">Reports</a>
-  <a href="about.html"   class="nav-link" data-page="about.html">About Us</a>
-  <a href="login.html"   class="nav-link js-login-link" data-page="login.html">Login</a>
-</nav>
 
+      <!-- UPDATED UNIVERSAL NAV -->
+      <nav class="nav" aria-label="Primary">
+        <a href="index.html"  class="nav-link"               data-page="index.html">Home</a>
+        <a href="upload.html" class="nav-link"               data-page="upload.html">Upload</a>
+        <a href="reports.html" class="nav-link"              data-page="reports.html">Reports</a>
+        <a href="about.html"  class="nav-link active"        data-page="about.html">About Us</a>
+        <a href="login.html"  class="nav-link js-login-link" data-page="login.html">Login</a>
+      </nav>
     </div>
   </header>
 
+  <!-- Main -->
   <main class="container narrow">
     <section class="section-pad">
-      <h1 class="h-title">About</h1>
+
+      <h1 class="h-title">About the Project</h1>
       <p class="muted">
-        This project was developed as part of the Purdue University Senior Capstone Project 2025.  
-        Our goal is to design an AI-powered system to assist with early detection of skin diseases.
+        SkinAI Classifier is a senior capstone project developed at Purdue Fort Wayne University.
+        Our mission is to create a user-friendly interface for uploading skin images,
+        collecting relevant patient information, and integrating machine-learning models
+        that assist with early detection and classification of skin diseases.
       </p>
-      <h2>Meet the Team</h2>
-      <div class="team-grid">
-        <div class="member"><div class="avatar">DW</div><div><h3>Damian Williams</h3><p class="muted">Team Lead · Backend</p></div></div>
-        <div class="member"><div class="avatar">SY</div><div><h3>Srinithi Yalamanchili</h3><p class="muted">Frontend</p></div></div>
-        <div class="member"><div class="avatar">MNG</div><div><h3>Manuel Nieves Garcia</h3><p class="muted">Frontend</p></div></div>
-        <div class="member"><div class="avatar">MS</div><div><h3>Maddie Sidwell</h3><p class="muted">Full stack</p></div></div>
-        <div class="member"><div class="avatar">SO</div><div><h3>Savannah Ostermeyer</h3><p class="muted">Backend</p></div></div>
+
+      <p class="muted">
+        This project is not a medical diagnosis tool - it is purely for research, education,
+        and demonstrating AI-assisted classification workflows.
+      </p>
+
+      <hr style="border-color:#2a2a2a; margin:25px 0;">
+
+      <h2 class="h-title" style="font-size:1.6rem;">Meet the Team</h2>
+      <p class="muted">The developers behind the system.</p>
+
+      <!-- MERGED TEAM GRID -->
+      <div class="team-grid" style="margin-top:16px;">
+        <div class="member">
+          <div class="avatar">DW</div>
+          <div>
+            <h3>Damian Williams</h3>
+            <p class="muted">Team Lead · Backend</p>
+          </div>
+        </div>
+
+        <div class="member">
+          <div class="avatar">SY</div>
+          <div>
+            <h3>Srinithi Yalamanchili</h3>
+            <p class="muted">Frontend</p>
+          </div>
+        </div>
+
+        <div class="member">
+          <div class="avatar">MNG</div>
+          <div>
+            <h3>Manuel Nieves Garcia</h3>
+            <p class="muted">Frontend</p>
+          </div>
+        </div>
+
+        <div class="member">
+          <div class="avatar">MS</div>
+          <div>
+            <h3>Maddie Sidwell</h3>
+            <p class="muted">Full Stack</p>
+          </div>
+        </div>
+
+        <div class="member">
+          <div class="avatar">SO</div>
+          <div>
+            <h3>Savannah Ostermeyer</h3>
+            <p class="muted">Backend</p>
+          </div>
+        </div>
       </div>
+
     </section>
   </main>
 
-  <footer class="site-footer">
+  <!-- Footer -->
+  <footer class="site-footer" role="contentinfo">
     <div class="container">
-      <p class="footnote">© <span id="year"></span> SkinAI Classifier</p>
+      <p class="footnote">© <span id="year"></span> SkinAI Classifier · Senior Capstone Project</p>
     </div>
-    <div data-nav></div>
-
   </footer>
-  <script src="scripts/app.js"></script>
 
-<!-- Floating Chatbot Widget -->
+
+  <!-- Floating Chatbot Widget -->
 <div id="chatbot-widget">
   <div id="chatbot-button">
     <span class="chat-icon">💬</span>
@@ -76,9 +137,9 @@
   </div>
 </div>
 
-
-
-<script src="scripts/chatbot.js"></script>
-
+  <!-- Scripts -->
+  <script src="scripts/chatbot.js"></script>
+  <script src="scripts/app.js"></script>
+  
 </body>
 </html>
