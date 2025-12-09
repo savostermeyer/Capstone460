@@ -1,159 +1,115 @@
 // scripts/account.js
-// Simple account page logic:
-// - Redirects to login if not signed in
-// - Shows email and basic stats
-// - Lets me choose and save my role (patient or doctor)
+// Simple account page logic: show email, account role (read-only),
+// usage stats based on saved reports, and handle sign out.
 
-document.addEventListener("DOMContentLoaded", () => {
-  // read logged-in user email
-  let email = null;
+function getCurrentUserEmail() {
   try {
-    email = localStorage.getItem("skinai_user");
+    return localStorage.getItem("skinai_user") || null;
   } catch (e) {
     console.error("localStorage unavailable", e);
+    return null;
   }
+}
 
-  // if not signed in, send to login and come back here
-  if (!email) {
-    const next = encodeURIComponent("account.html");
-    window.location.href = `login.html?next=${next}`;
-    return;
+// Read all reports for a given email (same shape as upload/reports pages)
+function getUserReports(email) {
+  if (!email) return [];
+  try {
+    const raw = localStorage.getItem(`skinai_reports_${email}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    console.error("Failed to read reports", e);
+    return [];
   }
+}
 
-  // make sure footer year is set (in case app.js missed it)
+// Read stored role if backend sets it later; default to patient/general
+function getUserRole(email) {
+  if (!email) return "Patient / General user";
+  try {
+    const raw = localStorage.getItem(`skinai_role_${email}`);
+    return raw || "Patient / General user";
+  } catch (e) {
+    console.error("Failed to read role", e);
+    return "Patient / General user";
+  }
+}
+
+function fmtDate(iso) {
+  if (!iso) return "None";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "None";
+  return d.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
   const yearEl = document.getElementById("year");
   if (yearEl && !yearEl.textContent) {
     yearEl.textContent = new Date().getFullYear();
   }
 
-  // basic DOM references
-  const emailSpan = document.getElementById("acct-email");
-  const reportCountSpan = document.getElementById("acct-report-count");
-  const lastReportSpan = document.getElementById("acct-last-report");
-  const roleMsg = document.getElementById("role-msg");
+  const loggedOutCard = document.getElementById("account-logged-out");
+  const contentWrap = document.getElementById("account-content");
 
-  const rolePatient = document.getElementById("role-patient");
-  const roleDoctor = document.getElementById("role-doctor");
+  const emailEl = document.getElementById("account-email");
+  const roleEl = document.getElementById("account-role");
+  const totalReportsEl = document.getElementById("account-total-reports");
+  const lastReportEl = document.getElementById("account-last-report");
+  const signoutBtn = document.getElementById("account-signout");
 
-  const btnReports = document.getElementById("acct-go-reports");
-  const btnUpload = document.getElementById("acct-go-upload");
-  const btnSignout = document.getElementById("acct-signout");
+  const email = getCurrentUserEmail();
 
-  if (emailSpan) {
-    emailSpan.textContent = email;
+  // If user is not logged in, show "not signed in" card
+  if (!email) {
+    if (loggedOutCard) loggedOutCard.style.display = "block";
+    if (contentWrap) contentWrap.style.display = "none";
+    return;
   }
 
-  // ---- load reports for this user to show basic stats ----
+  // Logged-in view
+  if (loggedOutCard) loggedOutCard.style.display = "none";
+  if (contentWrap) contentWrap.style.display = "grid";
 
-  let reports = [];
-  try {
-    const raw = localStorage.getItem(`skinai_reports_${email}`);
-    reports = raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    console.error("Failed to read reports for account page", e);
-    reports = [];
+  if (emailEl) emailEl.textContent = email;
+
+  const role = getUserRole(email);
+  if (roleEl) roleEl.textContent = role;
+
+  const reports = getUserReports(email);
+  if (totalReportsEl) {
+    totalReportsEl.textContent = reports.length.toString();
   }
 
-  if (reportCountSpan) {
-    reportCountSpan.textContent = String(reports.length);
-  }
-
-  if (lastReportSpan) {
+  if (lastReportEl) {
     if (!reports.length) {
-      lastReportSpan.textContent = "None";
+      lastReportEl.textContent = "None";
     } else {
-      // find most recent by createdAt
-      let latest = reports[0];
-      for (const r of reports) {
-        if (r.createdAt && latest.createdAt && r.createdAt > latest.createdAt) {
-          latest = r;
-        }
-      }
-      const d = latest.createdAt ? new Date(latest.createdAt) : null;
-      lastReportSpan.textContent = d
-        ? d.toLocaleString([], {
-            year: "numeric",
-            month: "short",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "Unknown";
-    }
-  }
+      // take most recent by createdAt if present, else by array order
+      const withDates = reports
+        .map((r) => ({ r, d: r.createdAt ? new Date(r.createdAt) : null }))
+        .filter((x) => x.d && !Number.isNaN(x.d.getTime()));
 
-  // ---- role selection and persistence ----
-
-  const roleKey = `skinai_role_${email}`;
-  let currentRole = "patient";
-
-  try {
-    const saved = localStorage.getItem(roleKey);
-    if (saved === "doctor" || saved === "patient") {
-      currentRole = saved;
-    }
-  } catch (e) {
-    console.error("Failed to read saved role", e);
-  }
-
-  function updateRoleUI(role) {
-    if (rolePatient) rolePatient.checked = role === "patient";
-    if (roleDoctor) roleDoctor.checked = role === "doctor";
-    if (roleMsg) {
-      if (role === "doctor") {
-        roleMsg.textContent =
-          "Doctor / medical professional mode. This is still a demo interface and does not replace clinical judgment.";
+      if (withDates.length) {
+        withDates.sort((a, b) => b.d - a.d);
+        lastReportEl.textContent = fmtDate(withDates[0].r.createdAt);
       } else {
-        roleMsg.textContent =
-          "Patient / general user mode. This tool is a demonstration and not a substitute for a dermatologist.";
+        lastReportEl.textContent = "Available";
       }
     }
   }
 
-  updateRoleUI(currentRole);
-
-  function setRole(role) {
-    currentRole = role;
-    updateRoleUI(role);
-    try {
-      localStorage.setItem(roleKey, role);
-    } catch (e) {
-      console.error("Failed to save role", e);
-    }
-  }
-
-  if (rolePatient) {
-    rolePatient.addEventListener("change", () => {
-      if (rolePatient.checked) setRole("patient");
-    });
-  }
-
-  if (roleDoctor) {
-    roleDoctor.addEventListener("change", () => {
-      if (roleDoctor.checked) setRole("doctor");
-    });
-  }
-
-  // ---- buttons ----
-
-  if (btnReports) {
-    btnReports.addEventListener("click", () => {
-      window.location.href = "reports.html";
-    });
-  }
-
-  if (btnUpload) {
-    btnUpload.addEventListener("click", () => {
-      window.location.href = "upload.html";
-    });
-  }
-
-  if (btnSignout) {
-    btnSignout.addEventListener("click", () => {
+  if (signoutBtn) {
+    signoutBtn.addEventListener("click", () => {
       try {
         localStorage.removeItem("skinai_user");
       } catch (e) {
-        console.error("Failed to clear skinai_user", e);
+        console.error("Failed to clear user", e);
       }
       window.location.href = "login.html";
     });
