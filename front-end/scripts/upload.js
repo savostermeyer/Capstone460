@@ -1,6 +1,7 @@
 // scripts/upload.js
 // Handles multiple image upload, preview, form validation, demo analysis,
-// and storing demo reports so they appear on reports.html.
+// storing demo reports so they appear on reports.html, and sending uploads
+// + metadata to the chatbot backend.
 
 // ---- Helpers for demo reports (shape matches reports.js expectations) ----
 
@@ -69,8 +70,9 @@ function buildDemoResult(file, data, index) {
   };
 }
 
-// ---- Main upload page logic ----
-
+// -----------------------------
+// Main upload page logic
+// -----------------------------
 document.addEventListener("DOMContentLoaded", () => {
   const dz = document.getElementById("dz");
   const fileInput = document.getElementById("fileInput");
@@ -83,32 +85,30 @@ document.addEventListener("DOMContentLoaded", () => {
   const resultCard = document.getElementById("resultCard");
   const resultMeta = document.getElementById("resultMeta");
   const resultTags = document.getElementById("resultTags");
+  const yearEl = document.getElementById("year");
+  const chatWindow = document.getElementById("chatbot-window");
 
+  // Not on the upload page
   if (!dz || !fileInput || !preview || !form) {
-    // Not on the upload page, bail out quietly.
     return;
   }
 
   // Ensure footer year is filled if app.js hasn't done it yet
-  const yearEl = document.getElementById("year");
   if (yearEl && !yearEl.textContent) {
     yearEl.textContent = new Date().getFullYear();
   }
 
-  // Store currently selected image files
   const MAX_FILES = 6;
   let selectedFiles = [];
+  let justDropped = false;
 
   // ---- Login-required prompt ----
-
   function showLoginRequired() {
-    // Simple version for now; can be upgraded to a custom modal later.
     alert("Please log in to analyze and save your report.");
     window.location.href = "login.html?next=upload.html";
   }
 
   // --- Preview helpers ---
-
   function resetPreview() {
     preview.innerHTML = "";
     selectedFiles = [];
@@ -133,17 +133,21 @@ document.addEventListener("DOMContentLoaded", () => {
       selectedFiles.push(file);
 
       const url = URL.createObjectURL(file);
+      const imgWrap = document.createElement("div");
+      imgWrap.style.position = "relative";
+
       const img = document.createElement("img");
       img.src = url;
       img.alt = "Uploaded image preview";
-      preview.appendChild(img);
+
+      imgWrap.appendChild(img);
+      preview.appendChild(imgWrap);
     }
 
     validateForm();
   }
 
   // --- Drag & drop behavior ---
-
   const prevent = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -163,12 +167,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
   dz.addEventListener("drop", (e) => {
     dz.style.outline = "";
+    justDropped = true;
+
     if (e.dataTransfer && e.dataTransfer.files) {
-      addFilesFromList(e.dataTransfer.files);
+      const files = [...e.dataTransfer.files].filter((f) =>
+        /image\/(jpeg|png)/.test(f.type)
+      );
+      if (files.length) {
+        addFilesFromList(files);
+      }
     }
   });
 
-  dz.addEventListener("click", () => {
+  dz.addEventListener("click", (e) => {
+    // avoid double-click after drop
+    if (justDropped) {
+      justDropped = false;
+      return;
+    }
     fileInput.click();
   });
 
@@ -180,18 +196,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   fileInput.addEventListener("change", (e) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
+    const files = [...e.target.files].filter((f) =>
+      /image\/(jpeg|png)/.test(f.type)
+    );
+    if (files.length) {
       addFilesFromList(files);
-
-      // If you want newly chosen files to REPLACE the old selection instead of appending:
-      // resetPreview();
-      // addFilesFromList(files);
     }
   });
 
   // --- Form validation ---
-
   const requiredIds = ["name", "age", "skinType", "location", "duration"];
 
   function validateForm() {
@@ -222,8 +235,37 @@ document.addEventListener("DOMContentLoaded", () => {
   form.addEventListener("input", validateForm);
   form.addEventListener("change", validateForm);
 
-  // --- Submit (demo analysis for all selected files) ---
+  // -------------------------
+  // Send to chatbot backend
+  // -------------------------
+  function sendUploadToChat(imageFile, formDataObject) {
+    const fd = new FormData();
 
+    if (imageFile) {
+      fd.append("image", imageFile);
+    }
+
+    Object.entries(formDataObject || {}).forEach(([k, v]) => {
+      fd.append(k, v);
+    });
+
+    // BACKEND_URL and addMessage are expected to be defined in chatbot.js
+    return fetch(BACKEND_URL, { method: "POST", body: fd })
+      .then((r) => r.json())
+      .then((data) => {
+        if (typeof addMessage === "function") {
+          addMessage(data.reply || "Analysis complete.", "bot");
+        }
+      })
+      .catch((err) => {
+        console.error("Error sending upload to chatbot:", err);
+        if (typeof addMessage === "function") {
+          addMessage("Error sending upload.", "bot");
+        }
+      });
+  }
+
+  // --- Submit (demo analysis + chatbot integration) ---
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!selectedFiles.length) return;
@@ -292,10 +334,44 @@ document.addEventListener("DOMContentLoaded", () => {
       const combined = [...results, ...existing]; // newest first
       setUserReports(email, combined);
     }
+
+    // --- Chatbot integration ---
+    const imageFile = selectedFiles[0] || null;
+    const metadata = {
+      name: data.name,
+      age: String(data.age || ""),
+      sex: data.sex,
+      fitzpatrick: data.fitzpatrick,
+      body_site: data.location,
+      duration_days: String(data.duration_days || ""),
+      consent: consent && consent.checked ? "true" : "false"
+    };
+
+    if (typeof addMessage === "function") {
+      addMessage("Analyzing your uploaded image…", "bot");
+    }
+
+    if (analyzeBtn) {
+      analyzeBtn.textContent = "Analyzing…";
+      analyzeBtn.disabled = true;
+    }
+
+    sendUploadToChat(imageFile, metadata).finally(() => {
+      if (analyzeBtn) {
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = "Analyze";
+      }
+    });
+
+    if (chatWindow) {
+      chatWindow.style.display = "flex";
+      try {
+        localStorage.setItem("skinai_chat_open", "true");
+      } catch (_) {}
+    }
   });
 
   // --- Clear button ---
-
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
       form.reset();
@@ -304,6 +380,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (formMsg) {
         formMsg.textContent =
           "Upload at least one image, fill required fields, and confirm consent.";
+      }
+      if (analyzeBtn) {
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = "Analyze";
       }
       validateForm();
     });
