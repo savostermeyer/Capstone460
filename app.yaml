@@ -1,0 +1,13 @@
+# Google Cloud Run deployment configuration
+# This file is optional but useful for configuring deployment settings
+runtime: python313
+
+env: standard
+
+entrypoint: gunicorn --bind :$PORT --workers 1 --timeout 600 expertSystem.app:app
+
+env_variables:
+  PYTHONUNBUFFERED: "1"
+
+# If you want to use App Engine instead of Cloud Run, use this file
+# For Cloud Run, the Dockerfile takes precedence
