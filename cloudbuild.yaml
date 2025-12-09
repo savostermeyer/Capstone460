@@ -1,0 +1,34 @@
+# Cloud Build configuration for automated deployment
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/capstone:$SHORT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/capstone:latest'
+      - '.'
+
+  # Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/capstone:$SHORT_SHA'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    args:
+      - run
+      - --filename=.
+      - --image=gcr.io/$PROJECT_ID/capstone:$SHORT_SHA
+      - --location=us-central1
+      - --output=/workspace/deploy
+
+# Store images in Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/capstone:$SHORT_SHA'
+  - 'gcr.io/$PROJECT_ID/capstone:latest'
+
+# Build timeout
+timeout: '1200s'
