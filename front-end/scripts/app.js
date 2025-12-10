@@ -1,24 +1,23 @@
-document.getElementById('year').textContent = new Date().getFullYear();
+// scripts/app.js
 
-const drop = document.getElementById('dropzone');
-const input = document.getElementById('fileInput');
-const preview = document.getElementById('preview');
+(function () {
+  // footer year
+  const y = document.getElementById('year');
+  if (y) y.textContent = new Date().getFullYear();
 
-function handleFiles(files){
-  if(!files) return;
-  [...files].forEach(f => {
-    if(!f.type.startsWith('image/')) return;
-    const url = URL.createObjectURL(f);
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = 'Uploaded preview';
-    if(preview) preview.appendChild(img);
+  // active nav link
+  const file = location.pathname.split('/').pop() || 'index.html';
+  document.querySelectorAll('.nav .nav-link[data-page]').forEach(a => {
+    if (a.getAttribute('data-page') === file) a.classList.add('active');
   });
-}
-if(input){ input.addEventListener('change', () => handleFiles(input.files)); }
-if(drop){
-  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }));
-  drop.addEventListener('drop', e => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
-  drop.addEventListener('click', () => input && input.click());
-  drop.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input && input.click(); } });
-}
+
+  // flip Login -> Account if signed in (optional future account page)
+  try {
+    const user = localStorage.getItem('skinai_user') || sessionStorage.getItem('skinai_user');
+    const loginLink = document.querySelector('.js-login-link');
+    if (loginLink && user) {
+      loginLink.textContent = 'Account';
+      loginLink.setAttribute('href', 'account.html');
+    }
+  } catch {}
+})();
