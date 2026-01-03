@@ -25,3 +25,5 @@ __pycache__/
 
 #Ignore env
 .env
+
+.front-end-temp/
