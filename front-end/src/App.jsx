@@ -1,35 +1,28 @@
-import { Routes, Route } from "react-router-dom";
+//Allows the navigation buttons to link to different pages
 
-function Home() {
-  return <h1>Home</h1>;
-}
+import { Routes, Route, Navigate } from "react-router-dom";
+import Navbar from "./components/Navbar.jsx";
+import Footer from "./components/Footer.jsx"
 
-function Upload() {
-  return <h1>Upload</h1>;
-}
+import Home from "./pages/Home.jsx";
+import Upload from "./pages/Upload.jsx";
+import Reports from "./pages/Reports.jsx";
+import Login from "./pages/Login.jsx";
+import Team from "./pages/Team.jsx";
 
-function Reports() {
-  return <h1>Reports</h1>;
-}
-
-function Login() {
-  return <h1>Login</h1>;
-}
-
-function Team() {
-  return <h1>Team</h1>;
-}
-function About(){
-  return <h1>About</h1>;
-}
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/upload" element={<Upload />} />
-      <Route path="/reports" element={<Reports />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/team" element={<Team />} />
-    </Routes>
+    <>
+      <Navbar />
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/upload" element={<Upload />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/team" element={<Team />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <Footer />
+    </>
   );
 }
