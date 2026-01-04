@@ -19,7 +19,9 @@ function Login() {
 function Team() {
   return <h1>Team</h1>;
 }
-
+function About(){
+  return <h1>About</h1>;
+}
 export default function App() {
   return (
     <Routes>
