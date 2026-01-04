@@ -11,6 +11,9 @@ import Login from "./pages/Login.jsx";
 import Team from "./pages/Team.jsx";
 import About from "./pages/About.jsx";
 
+import ChatbotWidget from "./components/ChatbotWidget.jsx";
+
+
 export default function App() {
   return (
     <>
@@ -25,6 +28,8 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Footer />
+      <ChatbotWidget />
     </>
   );
 }
+
