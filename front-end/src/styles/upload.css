@@ -1,0 +1,18 @@
+.q-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.q-card{ background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px; box-shadow: var(--shadow); }
+.q-label{ display:block; font-weight:700; margin-bottom:8px; }
+.q-hint{ margin:6px 0 0; font-size:.85rem; color:var(--muted); }
+.q-input,.q-select,.q-textarea{
+  width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2a2a2a; background:#0f0f0f; color:var(--text);
+}
+.q-textarea{ min-height:110px; resize:vertical; }
+.section-sub{ margin:-6px 0 14px; color:var(--muted); }
+.form-actions{
+  position:sticky; bottom:0; background: linear-gradient(180deg, rgba(10,10,10,.1), var(--bg));
+  padding:10px 0 0; margin-top: 6px; display:flex; gap:10px; align-items:center;
+}
+.pill{ display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid #2a2a2a; background:#111; margin: 2px 6px 0 0; font-size:.85rem; }
+.result{ display:none; } .result.show{ display:block; }
+.req{ color: var(--gold); margin-left: 4px; }
+.dropzone{ outline-offset:4px; cursor:pointer; }
+.preview img{ width:100%; height:220px; object-fit:cover; border-radius:12px; border:1px solid #2a2a2a; }
