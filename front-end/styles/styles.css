@@ -307,3 +307,122 @@ body{
   margin-bottom: 10px !important;
   font-weight: 600 !important;
 }
+
+
+/* I want disabled buttons to look clearly inactive */
+.btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Optional: keep CTA color but dim it when disabled */
+.btn-cta[disabled] {
+  background: var(--gold);
+  filter: grayscale(30%);
+}
+
+/* Modal backdrop */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+/* Modal window */
+.modal-content {
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 24px;
+  width: min(90%, 420px);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.modal-content h2 {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+}
+
+.modal-content p {
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* ---------------- Utility buttons ---------------- */
+
+.btn-secondary {
+  display: inline-block;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 600;
+  color: var(--text);
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+}
+
+.btn-secondary:hover {
+  background: #222;
+}
+
+/* Simple utility to hide elements */
+.hidden {
+  display: none !important;
+}
+
+/* ---------------- Modal (login required) ---------------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+}
+
+.modal-content {
+  background: #111;
+  border-radius: 12px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  max-width: 360px;
+  width: 100%;
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 1.1rem;
+}
+
+.modal-content p {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
