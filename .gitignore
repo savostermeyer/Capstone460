@@ -1,27 +1,41 @@
-#Ignore dataset
+# ----------------------
+# Data / artifacts
+# ----------------------
 data/
 
-#Ignore virtual environment
+# ----------------------
+# Python
+# ----------------------
 venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.ipynb_checkpoints/
 
-#Ignore Python cache
-__pycache__/
-*.pyc
-
-#Ignore Jupyter checkpoints
-*.ipynb_checkpoints/
-# Ignore dataset
-data/
-
-# Ignore virtual environment
-venv/
-
-# Ignore Python cache
-__pycache__/
-*.pyc
-
-# Ignore Jupyter checkpoints
-*.ipynb_checkpoints/
-
-#Ignore env
+# ----------------------
+# Environment
+# ----------------------
 .env
+
+# ----------------------
+# Node / React / Vite
+# ----------------------
+**/node_modules/
+**/dist/
+**/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ----------------------
+# OS / Editor
+# ----------------------
+.DS_Store
+Thumbs.db
+.vscode/
+
+# ----------------------
+# Temp / legacy
+# ----------------------
+front-end-temp/
