@@ -5,8 +5,8 @@ const chatMessages = document.getElementById("chatbot-messages");
 const chatInput = document.getElementById("chatbot-input");
 const chatSend = document.getElementById("chatbot-send");
 
-// Backend
-const BACKEND_URL = "http://127.0.0.1:3720/chat?sid=demo";
+// Backend - connects to the chat endpoint on the same server
+const BACKEND_URL = "/chat";
 
 // UI open/close
 chatButton.addEventListener("click", () => {
@@ -19,7 +19,7 @@ chatClose.addEventListener("click", () => {
 
 // Input handlers
 chatSend.addEventListener("click", sendMessage);
-chatInput.addEventListener("keypress", e => {
+chatInput.addEventListener("keypress", (e) => {
   if (e.key === "Enter") sendMessage();
 });
 
@@ -46,21 +46,16 @@ async function sendMessage() {
   try {
     const res = await fetch(BACKEND_URL, {
       method: "POST",
-      body: formData
+      body: formData,
     });
 
     const data = await res.json();
     console.log("AI Response:", data);
 
     const reply =
-      data.reply ||
-      data.message ||
-      data.text ||
-      data.assistant ||
-      "[No reply]";
+      data.reply || data.message || data.text || data.assistant || "[No reply]";
 
     addMessage(reply, "bot");
-
   } catch (err) {
     console.error(err);
     addMessage("Error: Unable to connect to AI assistant.", "bot");

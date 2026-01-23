@@ -2,13 +2,21 @@ const express = require("express");
 const { MongoClient } = require("mongodb");
 const multer = require("multer");
 const path = require("path");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Initialize Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({
+  model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+});
+
 // Middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static("front-end"));
 
 // MongoDB connection
@@ -107,6 +115,37 @@ app.get("/api/images/:id", async (req, res) => {
   } catch (error) {
     console.error("Retrieve error:", error);
     res.status(500).json({ error: "Failed to retrieve image" });
+  }
+});
+
+// Chatbot endpoint
+app.post("/chat", async (req, res) => {
+  try {
+    const userMessage = req.body.text || "";
+
+    if (!userMessage) {
+      return res.status(400).json({ reply: "Please provide a message." });
+    }
+
+    // Create context for skin lesion assistant
+    const prompt = `You are SkinAI Assistant, a helpful AI assistant for a skin lesion classification system. 
+You help users understand skin conditions, answer questions about the upload process, and provide general dermatology information.
+You should be professional, empathetic, and remind users that this is not a substitute for professional medical advice.
+
+User question: ${userMessage}
+
+Provide a helpful, concise response:`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const reply = response.text();
+
+    res.json({ reply });
+  } catch (error) {
+    console.error("Chat error:", error);
+    res.status(500).json({
+      reply: "I'm having trouble connecting right now. Please try again later.",
+    });
   }
 });
 

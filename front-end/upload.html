@@ -1,16 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SkinAI Classifier — Upload</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SkinAI Classifier — Upload</title>
 
-  <link rel="stylesheet" href="styles/styles.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap"
+      rel="stylesheet">
 
-  <style>
+    <style>
     .q-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
     .q-card{ background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px; box-shadow: var(--shadow); }
     .q-label{ display:block; font-weight:700; margin-bottom:8px; }
@@ -30,137 +32,148 @@
     .dropzone{ outline-offset:4px; cursor:pointer; }
     .preview img{ width:100%; height:220px; object-fit:cover; border-radius:12px; border:1px solid #2a2a2a; }
   </style>
-</head>
+  </head>
 
-<body>
-  <!-- Header -->
-  <header class="site-header">
-    <div class="container header-inner">
-      <a class="brand" href="index.html">
-        <div class="brand-mark">AI</div>
-        <div class="brand-text">
-          <strong>SkinAI Classifier</strong>
-          <span>Purdue University</span>
-        </div>
-      </a>
+  <body>
+    <!-- Header -->
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="index.html">
+          <div class="brand-mark">AI</div>
+          <div class="brand-text">
+            <strong>SkinAI Classifier</strong>
+            <span>Purdue University</span>
+          </div>
+        </a>
 
-      <nav class="nav">
-        <a href="index.html" class="nav-link">Home</a>
-        <a href="upload.html" class="nav-link active">Upload</a>
-        <a href="reports.html" class="nav-link">Reports</a>
-        <a href="team.html" class="nav-link">About Us</a>
-        <a href="login.html" class="nav-link">Login</a>
-      </nav>
-    </div>
-  </header>
-
-  <!-- Main -->
-  <main class="container narrow">
-    <section class="section-pad">
-      <h1 class="h-title">Upload</h1>
-      <p class="muted">Drag and drop JPG/PNG files or click to browse.</p>
-
-      <!-- DROPZONE -->
-      <div id="dz" class="dropzone card" tabindex="0">
-        <div style="font-size:2rem;">⬆️</div>
-        <p class="dz-title" style="font-weight:700;">Drag & drop your images here</p>
-        <p class="dz-sub" style="color:var(--muted)">or click to browse</p>
-
-        <label class="file-btn" style="margin-top:10px;">
-          Choose File
-          <input id="fileInput" type="file" accept="image/jpeg,image/png" multiple />
-        </label>
-
-        <p class="q-hint">Tip: Upload multiple images for comparison.</p>
+        <nav class="nav">
+          <a href="index.html" class="nav-link">Home</a>
+          <a href="upload.html" class="nav-link active">Upload</a>
+          <a href="reports.html" class="nav-link">Reports</a>
+          <a href="team.html" class="nav-link">About Us</a>
+          <a href="login.html" class="nav-link">Login</a>
+        </nav>
       </div>
+    </header>
 
-      <!-- PREVIEW -->
-      <div id="preview" class="preview"
-        style="margin-top:16px; display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
-      </div>
+    <!-- Main -->
+    <main class="container narrow">
+      <section class="section-pad">
+        <h1 class="h-title">Upload</h1>
+        <p class="muted">Drag and drop JPG/PNG files or click to browse.</p>
 
-      <!-- FORM -->
-      <form id="intakeForm" class="card">
-        <h2 class="h-title" style="font-size:1.25rem;">Patient Intake</h2>
-        <p class="section-sub">Required fields marked with <span class="req">*</span></p>
+        <!-- DROPZONE -->
+        <div id="dz" class="dropzone card" tabindex="0">
+          <div style="font-size:2rem;">⬆️</div>
+          <p class="dz-title" style="font-weight:700;">Drag & drop your images
+            here</p>
+          <p class="dz-sub" style="color:var(--muted)">or click to browse</p>
 
-        <div class="q-grid">
-          <div class="q-card">
-            <label class="q-label">Full Name <span class="req">*</span></label>
-            <input class="q-input" id="name" required />
-          </div>
+          <label class="file-btn" style="margin-top:10px;">
+            Choose File
+            <input id="fileInput" type="file" accept="image/jpeg,image/png"
+              multiple />
+          </label>
 
-          <div class="q-card">
-            <label class="q-label">Age <span class="req">*</span></label>
-            <input class="q-input" id="age" type="number" min="0" max="120" required />
-          </div>
-
-          <div class="q-card">
-            <label class="q-label">Sex at Birth</label>
-            <select class="q-select" id="sex">
-              <option value="">Prefer not to say</option>
-              <option>Female</option>
-              <option>Male</option>
-              <option>Intersex</option>
-            </select>
-          </div>
-
-          <div class="q-card">
-            <label class="q-label">Skin Condition <span class="req">*</span></label>
-            <select class="q-select" id="skinType" required>
-              <option value="">Select...</option>
-              <option value="I">I — Very fair</option>
-              <option value="II">II — Fair</option>
-              <option value="III">III — Medium</option>
-              <option value="IV">IV — Olive</option>
-              <option value="V">V — Brown</option>
-              <option value="VI">VI — Dark brown</option>
-            </select>
-          </div>
-
-          <div class="q-card">
-            <label class="q-label">Location <span class="req">*</span></label>
-            <input class="q-input" id="location" required />
-          </div>
-
-          <div class="q-card">
-            <label class="q-label">Duration (days) <span class="req">*</span></label>
-            <input class="q-input" id="duration" type="number" min="0" max="3650" required />
-          </div>
-
-          <div class="q-card" style="grid-column:1/-1;">
-            <label>
-              <input id="consent" type="checkbox" /> I confirm this image is mine and consent to analysis.
-              <span class="req">*</span>
-            </label>
-          </div>
+          <p class="q-hint">Tip: Upload multiple images for comparison.</p>
         </div>
 
-        <div class="form-actions">
-          <button id="analyzeBtn" class="btn btn-cta" type="submit" disabled>Analyze</button>
-          <button type="button" id="clearBtn" class="btn btn-secondary">Clear</button>
-          <span id="formMsg" class="q-hint"></span>
+        <!-- PREVIEW -->
+        <div id="preview" class="preview"
+          style="margin-top:16px; display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
         </div>
-      </form>
 
-      <!-- RESULTS -->
-      <div id="resultCard" class="card result">
-        <h3>Preliminary Analysis (demo)</h3>
-        <p id="resultMeta" class="muted"></p>
-        <div id="resultTags" style="margin-top:6px;"></div>
+        <!-- FORM -->
+        <form id="intakeForm" class="card">
+          <h2 class="h-title" style="font-size:1.25rem;">Patient Intake</h2>
+          <p class="section-sub">Required fields marked with <span
+              class="req">*</span></p>
+
+          <div class="q-grid">
+            <div class="q-card">
+              <label class="q-label">Full Name <span
+                  class="req">*</span></label>
+              <input class="q-input" id="name" required />
+            </div>
+
+            <div class="q-card">
+              <label class="q-label">Age <span class="req">*</span></label>
+              <input class="q-input" id="age" type="number" min="0" max="120"
+                required />
+            </div>
+
+            <div class="q-card">
+              <label class="q-label">Sex at Birth</label>
+              <select class="q-select" id="sex">
+                <option value>Prefer not to say</option>
+                <option>Female</option>
+                <option>Male</option>
+                <option>Intersex</option>
+              </select>
+            </div>
+
+            <div class="q-card">
+              <label class="q-label">Skin Condition <span
+                  class="req">*</span></label>
+              <select class="q-select" id="skinType" required>
+                <option value>Select...</option>
+                <option value="I">I — Very fair</option>
+                <option value="II">II — Fair</option>
+                <option value="III">III — Medium</option>
+                <option value="IV">IV — Olive</option>
+                <option value="V">V — Brown</option>
+                <option value="VI">VI — Dark brown</option>
+              </select>
+            </div>
+
+            <div class="q-card">
+              <label class="q-label">Location <span class="req">*</span></label>
+              <input class="q-input" id="location" required />
+            </div>
+
+            <div class="q-card">
+              <label class="q-label">Duration (days) <span
+                  class="req">*</span></label>
+              <input class="q-input" id="duration" type="number" min="0"
+                max="3650" required />
+            </div>
+
+            <div class="q-card" style="grid-column:1/-1;">
+              <label>
+                <input id="consent" type="checkbox" /> I confirm this image is
+                mine and consent to analysis.
+                <span class="req">*</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button id="analyzeBtn" class="btn btn-cta" type="submit"
+              disabled>Analyze</button>
+            <button type="button" id="clearBtn"
+              class="btn btn-secondary">Clear</button>
+            <span id="formMsg" class="q-hint"></span>
+          </div>
+        </form>
+
+        <!-- RESULTS -->
+        <div id="resultCard" class="card result">
+          <h3>Preliminary Analysis (demo)</h3>
+          <p id="resultMeta" class="muted"></p>
+          <div id="resultTags" style="margin-top:6px;"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+      <div class="container">
+        <p class="footnote">© <span id="year"></span> SkinAI Classifier</p>
       </div>
-    </section>
-  </main>
+    </footer>
 
-  <!-- FOOTER -->
-  <footer class="site-footer">
-    <div class="container">
-      <p class="footnote">© <span id="year"></span> SkinAI Classifier</p>
-    </div>
-  </footer>
-
-  <!-- Upload JS -->
-  <script>
+    <!-- Upload JS -->
+    <script>
     document.getElementById('year').textContent = new Date().getFullYear();
 
     const dz = document.getElementById('dz');
@@ -237,32 +250,138 @@
       });
     }
 
+    // Enable/disable analyze button based on files and consent
+    const consentCheckbox = document.getElementById('consent');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    
+    function updateAnalyzeButton() {
+      analyzeBtn.disabled = !(selectedFiles.length > 0 && consentCheckbox.checked);
+    }
+    
+    consentCheckbox.addEventListener('change', updateAnalyzeButton);
+
+    // Form submission - upload to MongoDB
+    const intakeForm = document.getElementById('intakeForm');
+    const formMsg = document.getElementById('formMsg');
+    const resultCard = document.getElementById('resultCard');
+    const resultMeta = document.getElementById('resultMeta');
+    const resultTags = document.getElementById('resultTags');
+
+    intakeForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      if (selectedFiles.length === 0) {
+        formMsg.textContent = '⚠️ Please upload at least one image.';
+        formMsg.style.color = 'var(--gold)';
+        return;
+      }
+
+      if (!consentCheckbox.checked) {
+        formMsg.textContent = '⚠️ Please confirm consent.';
+        formMsg.style.color = 'var(--gold)';
+        return;
+      }
+
+      // Disable button during upload
+      analyzeBtn.disabled = true;
+      formMsg.textContent = '⏳ Uploading...';
+      formMsg.style.color = 'var(--text)';
+
+      try {
+        // Upload each image
+        const uploadPromises = selectedFiles.map(async (file) => {
+          const formData = new FormData();
+          formData.append('image', file);
+          
+          // Add patient info as JSON
+          const patientInfo = {
+            name: document.getElementById('name').value,
+            age: document.getElementById('age').value,
+            sex: document.getElementById('sex').value,
+            skinType: document.getElementById('skinType').value,
+            location: document.getElementById('location').value,
+            duration: document.getElementById('duration').value,
+            uploadDate: new Date().toISOString()
+          };
+          
+          formData.append('patientInfo', JSON.stringify(patientInfo));
+
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            throw new Error(`Upload failed: ${response.statusText}`);
+          }
+
+          return await response.json();
+        });
+
+        const results = await Promise.all(uploadPromises);
+
+        // Show success message
+        formMsg.textContent = `✅ Successfully uploaded ${results.length} image(s)!`;
+        formMsg.style.color = 'var(--gold)';
+
+        // Show result card
+        resultCard.classList.add('show');
+        resultMeta.textContent = `Uploaded ${results.length} image(s) for ${document.getElementById('name').value}`;
+        resultTags.innerHTML = results.map(r => 
+          `<span class="pill">Image ID: ${r.imageId}</span>`
+        ).join('');
+
+        // Clear form after 3 seconds
+        setTimeout(() => {
+          document.getElementById('clearBtn').click();
+        }, 3000);
+
+      } catch (error) {
+        console.error('Upload error:', error);
+        formMsg.textContent = `❌ Upload failed: ${error.message}`;
+        formMsg.style.color = '#ff4444';
+      } finally {
+        analyzeBtn.disabled = false;
+      }
+    });
+
+    // Clear button functionality
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      intakeForm.reset();
+      selectedFiles = [];
+      preview.innerHTML = '';
+      formMsg.textContent = '';
+      resultCard.classList.remove('show');
+      updateAnalyzeButton();
+    });
+
   </script>
 
-  <!-- CHATBOT WIDGET (Correct — only one version) -->
-  <div id="chatbot-widget">
-    <div id="chatbot-button">
-      <span class="chat-icon">💬</span>
-      <span class="chat-label">Talk to AI Agent</span>
-    </div>
-
-    <div id="chatbot-window">
-      <div id="chatbot-header">
-        <span>Talk to AI Agent</span>
-        <button id="chatbot-close">✕</button>
+    <!-- CHATBOT WIDGET (Correct — only one version) -->
+    <div id="chatbot-widget">
+      <div id="chatbot-button">
+        <span class="chat-icon">💬</span>
+        <span class="chat-label">Talk to AI Agent</span>
       </div>
 
-      <div id="chatbot-messages"></div>
+      <div id="chatbot-window">
+        <div id="chatbot-header">
+          <span>Talk to AI Agent</span>
+          <button id="chatbot-close">✕</button>
+        </div>
 
-      <div id="chatbot-input-area">
-        <input id="chatbot-input" type="text" placeholder="Type your message…" />
-        <button id="chatbot-send">➤</button>
+        <div id="chatbot-messages"></div>
+
+        <div id="chatbot-input-area">
+          <input id="chatbot-input" type="text"
+            placeholder="Type your message…" />
+          <button id="chatbot-send">➤</button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- Correct chatbot JS path -->
-  <script src="scripts/chatbot.js"></script>
+    <!-- Correct chatbot JS path -->
+    <script src="scripts/chatbot.js"></script>
 
-</body>
+  </body>
 </html>
