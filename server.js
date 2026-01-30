@@ -3,6 +3,7 @@ const { MongoClient } = require("mongodb");
 const multer = require("multer");
 const path = require("path");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const bcrypt = require("bcrypt");
 require("dotenv").config();
 
 const app = express();
@@ -20,7 +21,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static("front-end"));
 
 // MongoDB connection
-const client = new MongoClient(process.env.MONGODB_URI);
+const client = new MongoClient(process.env.MONGODB_URI, {
+  serverSelectionTimeoutMS: 5000,
+});
 let db;
 
 async function connectDB() {
@@ -34,6 +37,11 @@ async function connectDB() {
   }
 }
 
+// Get auth database helper
+function getAuthDB() {
+  return client.db("auth");
+}
+
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -43,7 +51,7 @@ const upload = multer({
     const filetypes = /jpeg|jpg|png/;
     const mimetype = filetypes.test(file.mimetype);
     const extname = filetypes.test(
-      path.extname(file.originalname).toLowerCase()
+      path.extname(file.originalname).toLowerCase(),
     );
 
     if (mimetype && extname) {
@@ -113,8 +121,98 @@ app.get("/api/images/:id", async (req, res) => {
     res.set("Content-Type", image.contentType);
     res.send(image.data.buffer);
   } catch (error) {
-    console.error("Retrieve error:", error);
+    console.error("Error retrieving image:", error);
     res.status(500).json({ error: "Failed to retrieve image" });
+  }
+});
+
+// Authentication routes
+// Register endpoint
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    if (password.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
+    }
+
+    const authDB = getAuthDB();
+    const usersCollection = authDB.collection("users");
+
+    // Check if user already exists
+    const existingUser = await usersCollection.findOne({
+      email: email.toLowerCase(),
+    });
+    if (existingUser) {
+      return res.status(409).json({ error: "User already exists" });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user
+    const newUser = {
+      email: email.toLowerCase(),
+      password: hashedPassword,
+      createdAt: new Date(),
+    };
+
+    const result = await usersCollection.insertOne(newUser);
+
+    res.status(201).json({
+      message: "User created successfully",
+      userId: result.insertedId,
+      email: email.toLowerCase(),
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ error: "Failed to create user" });
+  }
+});
+
+// Login endpoint
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    const authDB = getAuthDB();
+    const usersCollection = authDB.collection("users");
+
+    // Find user
+    const user = await usersCollection.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // Update last login
+    await usersCollection.updateOne(
+      { _id: user._id },
+      { $set: { lastLogin: new Date() } },
+    );
+
+    res.json({
+      message: "Login successful",
+      email: user.email,
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Failed to login" });
   }
 });
 
