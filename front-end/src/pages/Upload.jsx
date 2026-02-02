@@ -142,7 +142,7 @@ export default function Upload() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
 
     if (!canAnalyze) {
@@ -150,19 +150,65 @@ export default function Upload() {
       return;
     }
 
-    // Demo analysis (matches your current “Preliminary Analysis (demo)” idea)
-    const now = new Date();
-    const meta = `${files.length} image(s) • ${now.toLocaleString()}`;
+    setFormMsg("Uploading...");
 
+<<<<<<< HEAD
     const tags = [
       `Age: ${form.age}`,
       `Skin type: ${form.skinType}`,
       `Location: ${form.lesionLocation === "Other" ? form.lesionLocationOther : form.lesionLocation}`,
       `Duration: ${form.duration} day(s)`,
     ];
+=======
+    try {
+      // Upload each file to the server
+      const uploadPromises = files.map(async (file) => {
+        const formData = new FormData();
+        formData.append("image", file);
+        formData.append("patientInfo", JSON.stringify({
+          name: form.name,
+          age: form.age,
+          sex: form.sex,
+          skinType: form.skinType,
+          location: form.location,
+          duration: form.duration,
+          uploadDate: new Date().toISOString(),
+        }));
+>>>>>>> a52989ab61387651868a7e0ac2653536eae1f813
 
-    setResult({ meta, tags });
-    setFormMsg("");
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || `Failed to upload ${file.name}`);
+        }
+
+        return await response.json();
+      });
+
+      const results = await Promise.all(uploadPromises);
+
+      // Demo analysis result
+      const now = new Date();
+      const meta = `${files.length} image(s) uploaded • ${now.toLocaleString()}`;
+
+      const tags = [
+        `Age: ${form.age}`,
+        `Skin type: ${form.skinType}`,
+        `Location: ${form.location}`,
+        `Duration: ${form.duration} day(s)`,
+      ];
+
+      setResult({ meta, tags });
+      setFormMsg(`✓ Successfully uploaded ${results.length} image(s) to database`);
+    } catch (error) {
+      console.error("Upload error:", error);
+      setFormMsg(`Error: ${error.message}`);
+      setResult(null);
+    }
   }
 
 function toggleSymptom(symptom) {
