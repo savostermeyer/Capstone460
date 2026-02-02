@@ -45,7 +45,9 @@ export default function Upload() {
       String(form.age).trim() &&
       form.sex &&
       form.skinType &&
-      (form.lesionLocation === "Other" ? form.lesionLocationOther.trim() : form.lesionLocation) &&
+      (form.lesionLocation === "Other"
+        ? form.lesionLocationOther.trim()
+        : form.lesionLocation) &&
       String(form.duration).trim();
 
     const hasSymptoms = form.primarySymptoms.length > 0;
@@ -111,11 +113,6 @@ export default function Upload() {
     setResult(null);
   }
 
-  function updateMulti(key, selectedOptions) {
-    const values = Array.from(selectedOptions).map((o) => o.value);
-    updateField(key, values);
-  }
-
   function clearAll() {
     setFiles([]);
     setPreviews([]);
@@ -142,6 +139,22 @@ export default function Upload() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  function toggleSymptom(symptom) {
+    setForm((prev) => {
+      const has = prev.primarySymptoms.includes(symptom);
+      const next = has
+        ? prev.primarySymptoms.filter((s) => s !== symptom)
+        : [...prev.primarySymptoms, symptom];
+
+      return {
+        ...prev,
+        primarySymptoms: next,
+        primarySymptomsOther: next.includes("Other") ? prev.primarySymptomsOther : "",
+      };
+    });
+    setResult(null);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
 
@@ -152,44 +165,68 @@ export default function Upload() {
 
     setFormMsg("Uploading...");
 
-<<<<<<< HEAD
-    const tags = [
-      `Age: ${form.age}`,
-      `Skin type: ${form.skinType}`,
-      `Location: ${form.lesionLocation === "Other" ? form.lesionLocationOther : form.lesionLocation}`,
-      `Duration: ${form.duration} day(s)`,
-    ];
-=======
+    // NOTE (backend contract):
+    // We append multiple files under the key "images" to send them in ONE request.
+    // If your backend expects a single file field (often named "image"), either:
+    //   1) update the backend to accept "images" as an array (multer: upload.array("images")), OR
+    //   2) change this line to: formData.append("image", file) and upload one-by-one.
+    // If you see errors like "Unexpected field" or "No file uploaded", this key name is the first thing to check.
+
     try {
-      // Upload each file to the server
-      const uploadPromises = files.map(async (file) => {
-        const formData = new FormData();
-        formData.append("image", file);
-        formData.append("patientInfo", JSON.stringify({
+      // ONE request for all images (better UX than 20 requests)
+      const formData = new FormData();
+      files.forEach((file) => formData.append("images", file));
+
+      formData.append(
+        "patientInfo",
+        JSON.stringify({
           name: form.name,
           age: form.age,
           sex: form.sex,
           skinType: form.skinType,
-          location: form.location,
-          duration: form.duration,
+
+          lesionLocation: form.lesionLocation,
+          lesionLocationOther: form.lesionLocationOther,
+
+          durationDays: form.duration,
+
+          primarySymptoms: form.primarySymptoms,
+          primarySymptomsOther: form.primarySymptomsOther,
+
+          medicalBackground: form.medicalBackground,
+          medicalBackgroundDetails: form.medicalBackgroundDetails,
+
+          familyHistory: form.familyHistory,
+          sunExposure: form.sunExposure,
+          spfUse: form.spfUse,
+
+          medications: form.medications,
+
           uploadDate: new Date().toISOString(),
-        }));
->>>>>>> a52989ab61387651868a7e0ac2653536eae1f813
+        })
+      );
 
-        const response = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
 
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || `Failed to upload ${file.name}`);
-        }
+        // If your login uses cookies/sessions (common with MongoDB + Express), this is required
+        // so the browser sends the session cookie with the upload request. If you use JWT in headers,
+        // you may remove this and instead send an Authorization header.
 
-        return await response.json();
+        // If your login uses cookies/sessions, this prevents 401/403
+        credentials: "include",
       });
 
-      const results = await Promise.all(uploadPromises);
+      // If backend returns non-JSON on errors, this avoids crash
+      let data = null;
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) data = await response.json();
+
+      if (!response.ok) {
+        const msg = data?.error || `Upload failed (${response.status})`;
+        throw new Error(msg);
+      }
 
       // Demo analysis result
       const now = new Date();
@@ -198,35 +235,20 @@ export default function Upload() {
       const tags = [
         `Age: ${form.age}`,
         `Skin type: ${form.skinType}`,
-        `Location: ${form.location}`,
+        `Location: ${
+          form.lesionLocation === "Other" ? form.lesionLocationOther : form.lesionLocation
+        }`,
         `Duration: ${form.duration} day(s)`,
       ];
 
       setResult({ meta, tags });
-      setFormMsg(`✓ Successfully uploaded ${results.length} image(s) to database`);
+      setFormMsg(`✓ Successfully uploaded ${files.length} image(s) to database`);
     } catch (error) {
       console.error("Upload error:", error);
       setFormMsg(`Error: ${error.message}`);
       setResult(null);
     }
   }
-
-function toggleSymptom(symptom) {
-  setForm((prev) => {
-    const has = prev.primarySymptoms.includes(symptom);
-    const next = has
-      ? prev.primarySymptoms.filter((s) => s !== symptom)
-      : [...prev.primarySymptoms, symptom];
-
-    return {
-      ...prev,
-      primarySymptoms: next,
-      primarySymptomsOther: next.includes("Other") ? prev.primarySymptomsOther : "",
-    };
-  });
-  setResult(null);
-}
-
 
   return (
     <main className="container narrow">
@@ -360,7 +382,6 @@ function toggleSymptom(symptom) {
                 <option value="">Select...</option>
                 <option>Female</option>
                 <option>Male</option>
-                <option>Intersex</option>
               </select>
               <p className="q-hint">Used only to provide context for the demo analysis.</p>
             </div>
@@ -406,6 +427,7 @@ function toggleSymptom(symptom) {
                 <option>Legs / Feet</option>
                 <option>Other</option>
               </select>
+
               {form.lesionLocation === "Other" && (
                 <input
                   className="q-input"
@@ -416,6 +438,7 @@ function toggleSymptom(symptom) {
                   required
                 />
               )}
+
               <p className="q-hint">Pick the closest area where the lesion is located.</p>
             </div>
 
@@ -435,6 +458,7 @@ function toggleSymptom(symptom) {
               <p className="q-hint">How long you’ve noticed the lesion (estimate is fine).</p>
             </div>
 
+            {/* Primary symptoms checkboxes */}
             <div className="q-card" style={{ gridColumn: "1 / -1" }}>
               <label className="q-label">
                 Primary Symptoms <span className="req">*</span>
@@ -475,7 +499,6 @@ function toggleSymptom(symptom) {
                 />
               )}
             </div>
-
 
             <div className="q-card" style={{ gridColumn: "1 / -1" }}>
               <label className="q-label">Medical Background</label>

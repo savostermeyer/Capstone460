@@ -1,3 +1,4 @@
+/* Upload Page Styles */
 .q-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .q-card{ background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px; box-shadow: var(--shadow); }
 .q-label{ display:block; font-weight:700; margin-bottom:8px; }
