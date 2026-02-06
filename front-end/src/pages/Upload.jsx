@@ -21,7 +21,10 @@ export default function Upload() {
 
   // Build object URLs for previews (and clean them up)
   useEffect(() => {
-    const next = files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
+    const next = files.map((f) => ({
+      name: f.name,
+      url: URL.createObjectURL(f),
+    }));
     setPreviews(next);
 
     return () => {
@@ -44,7 +47,7 @@ export default function Upload() {
     if (!fileList) return;
 
     const picked = Array.from(fileList).filter((f) =>
-      ["image/jpeg", "image/png"].includes(f.type)
+      ["image/jpeg", "image/png"].includes(f.type),
     );
 
     if (picked.length === 0) {
@@ -93,7 +96,9 @@ export default function Upload() {
     e.preventDefault();
 
     if (!canAnalyze) {
-      setFormMsg("Please complete required fields, consent, and add at least 1 image.");
+      setFormMsg(
+        "Please complete required fields, consent, and add at least 1 image.",
+      );
       return;
     }
 
@@ -104,17 +109,24 @@ export default function Upload() {
       const uploadPromises = files.map(async (file) => {
         const formData = new FormData();
         formData.append("image", file);
-        formData.append("patientInfo", JSON.stringify({
-          name: form.name,
-          age: form.age,
-          sex: form.sex,
-          skinType: form.skinType,
-          location: form.location,
-          duration: form.duration,
-          uploadDate: new Date().toISOString(),
-        }));
 
-        const response = await fetch("/api/upload", {
+        // required by Flask (strings "true"/"false")
+        formData.append("rapid_change", "false");
+        formData.append("bleeding", "false");
+        formData.append("itching", "false");
+        formData.append("pain", "false");
+
+        // include intake (Flask will receive these in request.form, useful later)
+        formData.append("name", form.name);
+        formData.append("age", String(form.age));
+        formData.append("sex", form.sex);
+        formData.append("skinType", form.skinType);
+        formData.append("location", form.location);
+        formData.append("duration_days", String(form.duration));
+        formData.append("consent", String(form.consent));
+        formData.append("uploadDate", new Date().toISOString());
+
+        const response = await fetch("http://localhost:3720/analyze_skin", {
           method: "POST",
           body: formData,
         });
@@ -129,19 +141,18 @@ export default function Upload() {
 
       const results = await Promise.all(uploadPromises);
 
-      // Demo analysis result
       const now = new Date();
-      const meta = `${files.length} image(s) uploaded • ${now.toLocaleString()}`;
+      const meta = `${results.length} image(s) analyzed • ${now.toLocaleString()}`;
 
-      const tags = [
-        `Age: ${form.age}`,
-        `Skin type: ${form.skinType}`,
-        `Location: ${form.location}`,
-        `Duration: ${form.duration} day(s)`,
-      ];
+      // use the first analyzed result for display (you can expand this later)
+      const first = results[0];
 
-      setResult({ meta, tags });
-      setFormMsg(`✓ Successfully uploaded ${results.length} image(s) to database`);
+      setResult({
+        meta,
+        raw: first, // ✅ THIS makes your new JSX work
+      });
+
+      setFormMsg(`✓ Analyzed ${results.length} image(s)`);
     } catch (error) {
       console.error("Upload error:", error);
       setFormMsg(`Error: ${error.message}`);
@@ -187,7 +198,11 @@ export default function Upload() {
             or click to browse
           </p>
 
-          <label className="file-btn" style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+          <label
+            className="file-btn"
+            style={{ marginTop: 10 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             Choose File
             <input
               ref={fileInputRef}
@@ -331,11 +346,19 @@ export default function Upload() {
           </div>
 
           <div className="form-actions">
-            <button className="btn btn-cta" type="submit" disabled={!canAnalyze}>
+            <button
+              className="btn btn-cta"
+              type="submit"
+              disabled={!canAnalyze}
+            >
               Analyze
             </button>
 
-            <button type="button" className="btn btn-secondary" onClick={clearAll}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={clearAll}
+            >
               Clear
             </button>
 
@@ -344,21 +367,45 @@ export default function Upload() {
             </span>
           </div>
         </form>
-
         {/* RESULTS */}
         <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
-          <h3>Preliminary Analysis (demo)</h3>
-          <p id="resultMeta" className="muted">
+          <h3>Preliminary Analysis</h3>
+
+          <p className="muted">
             {result?.meta || ""}
           </p>
-          <div id="resultTags" style={{ marginTop: 6 }}>
-            {result?.tags?.map((t) => (
-              <span key={t} className="pill">
-                {t}
-              </span>
-            ))}
-          </div>
+
+          {result?.raw && (
+            <>
+              <div style={{ marginTop: 10 }}>
+                <strong>Primary Result:</strong>{" "}
+                <span className="pill">
+                  {result.raw.primary_result ?? "N/A"}
+                </span>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <strong>Risk Indicators</strong>
+                <div style={{ marginTop: 6 }}>
+                  <span className="pill">
+                    High risk: {String(result.raw.key_indicators?.high_risk_flag)}
+                  </span>
+                  <span className="pill">
+                    Moderate risk: {String(result.raw.key_indicators?.moderate_risk_flag)}
+                  </span>
+                  <span className="pill">
+                    Low risk: {String(result.raw.key_indicators?.low_risk_flag)}
+                  </span>
+                  <span className="pill">
+                    Needs clinician review:{" "}
+                    {String(result.raw.key_indicators?.needs_clinician_review)}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
+
       </section>
     </main>
   );
