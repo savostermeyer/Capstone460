@@ -81,6 +81,16 @@ print(f"[Gemini] Using model: {MODEL_NAME}")
 @dataclass
 class ConvState:
     history: List[Dict[str, Any]] = field(default_factory=list)
+    
+    def trim_history(self, max_turns: int = 10):
+        """
+        Keep only the most recent N turns to prevent unbounded token growth.
+        Each 'turn' is typically 2 messages (user + model reply).
+        """
+        max_messages = max_turns * 2
+        if len(self.history) > max_messages:
+            # Keep only the last N messages; discard old context
+            self.history = self.history[-max_messages:]
 
 # ---- Tool declaration (use lowercase JSON Schema types) ----
 FUNCTIONS = [{
@@ -174,8 +184,9 @@ SYSTEM_INSTRUCTION = (
 )
 
 # Lazy model init with fallbacks (no network on import)
+# PRIORITY: Use preferred model first (from .env), then try alternatives if available
 PREFERRED = MODEL_NAME
-CANDIDATES = [PREFERRED, "gemini-1.5-flash-8b", "gemini-1.5-pro"]
+CANDIDATES = [PREFERRED, "gemini-1.5-flash-8b", "gemini-1.5-flash", "gemini-1.5-pro"]
 
 MODEL = None
 MODEL_NAME = PREFERRED  # keep name updated once we pick one
@@ -351,7 +362,7 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             parts.append(f"Patient: {metadata['name']}")
             
         if metadata.get("age"):
-            parts.append(f"Age: {metadata['page']}")
+            parts.append(f"Age: {metadata['age']}")
             
         if metadata.get("fitzpatrick"):
             parts.append(f"Skin type: {metadata['fitzpatrick']}")
@@ -371,9 +382,14 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             user_text = summary_text + "\n\nUser notes: " + user_text
         else:
             user_text = summary_text
-            
     
     # start the model char
+    # BEFORE: Trim old history to prevent unbounded token growth (issue at diagnostic stage)
+    initial_history_size = len(state.history)
+    state.trim_history(max_turns=10)  # Keep ~20 messages (10 turns)
+    trimmed_history_size = len(state.history)
+    print(f"[step] History trimmed: {initial_history_size} → {trimmed_history_size} messages")
+    
     chat = _get_model().start_chat(history=state.history)
     
     
@@ -382,12 +398,19 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
     try:
         initial = chat.send_message(user_text or "")
     except Exception as e:
-        msg = (
-            f"Model error: {e}\n"
-            "Try setting GEMINI_MODEL to a supported name (e.g., "
-            "gemini-2.0-flash, gemini-1.5-flash-8b, or gemini-1.5-pro)."
-        )
-        return {"reply": msg, "message": msg, "assistant": msg, "text": msg}
+        msg = str(e)
+        # Log 429 errors specifically for debugging
+        if "429" in msg or "Resource exhausted" in msg:
+            print(f"[step] 429 Rate limit detected: {msg[:100]}")
+        return {
+            "reply": f"Model error: {e}\n"
+                     "Try setting GEMINI_MODEL to a supported name (e.g., "
+                     "gemini-2.0-flash, gemini-1.5-flash-8b, or gemini-1.5-pro).",
+            "message": str(e),
+            "assistant": "[Error - please retry]",
+            "text": str(e),
+            "error": str(e)
+        }
 
     # 2) tool call handling (submit tool outputs back to the model)
     reply_text = None

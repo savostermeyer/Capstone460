@@ -299,13 +299,33 @@ def chat():
 
         # capture all other metadata from the intake form
         metadata = {k: v for k, v in request.form.items() if k not in ("text",)}
-        print("[UPLOAD] Metadata received:", metadata)
-        print("[UPLOAD] Text:", user_text)
-        print("[UPLOAD] Image received", bool(img))
+        print("[CHAT] Session:", sid)
+        print("[CHAT] Metadata received:", metadata)
+        print("[CHAT] Text:", user_text)
+        print("[CHAT] Image received:", bool(img))
+        print(f"[CHAT] History size before: {len(st.history)} messages")
 
         #   call AI logic
-        out = chat_step(st, user_text, img, metadata)
+        try:
+            out = chat_step(st, user_text, img, metadata)
+        except Exception as e:
+            error_str = str(e)
+            # Detect 429 (Resource exhausted / rate limit) errors
+            if "429" in error_str or "Resource exhausted" in error_str:
+                print(f"[CHAT] 429 Resource exhausted (history size: {len(st.history)})")
+                print(f"[CHAT] Consider reducing context or using a faster model.")
+                out = {
+                    "reply": "The AI service is temporarily overloaded. Please wait a moment and try again.",
+                    "message": "Service overloaded (429)",
+                    "assistant": "[Retry later]",
+                    "text": "[Service busy]",
+                    "error_code": "RATE_LIMIT"
+                }
+            else:
+                raise
+        
         _SESS[sid] = st
+        print(f"[CHAT] History size after: {len(st.history)} messages")
 
         # add absolute URLs for any image results
         out["metadata"] = metadata
@@ -324,7 +344,6 @@ def chat():
     except Exception as e:
         # Log full traceback to console for debugging
         import traceback
-
         traceback.print_exc()
         msg = f"Server error: {e}"
         # Keep 200 so the frontend can render the message in the chat bubble
@@ -332,6 +351,26 @@ def chat():
             jsonify({"reply": msg, "message": msg, "assistant": msg, "text": msg}),
             200,
         )
+
+        return jsonify(out)
+
+
+@app.post("/chat/reset")
+def chat_reset():
+    """Explicitly reset a conversation session (clear history to recover from rate limits)."""
+    try:
+        sid = request.args.get("sid")
+        if sid and sid in _SESS:
+            old_size = len(_SESS[sid].history)
+            _SESS[sid] = ConvState()
+            print(f"[CHAT] Reset session {sid} (cleared {old_size} messages)")
+            return jsonify({"message": "Chat session reset", "sid": sid})
+        else:
+            return jsonify({"message": "Session not found or already cleared"}), 404
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
