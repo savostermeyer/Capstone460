@@ -218,14 +218,49 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       });
 
       const chatJson = await chatRes.json();
-      setAiMsg(
-        chatJson.reply ||
-          chatJson.message ||
-          chatJson.assistant ||
-          chatJson.text ||
-          "",
-      );
+      const reply =
+        chatJson.reply || chatJson.message || chatJson.assistant || chatJson.text || "";
+        setAiMsg(String(reply));
+
+      // Dispatch assistant reply to chat widget and open it
+      try {
+        window.dispatchEvent(
+          new CustomEvent("skinai:assistantMessage", { detail: String(reply) }),
+        );
+        // signal the chat to open
+        window.dispatchEvent(new CustomEvent("skinai:open"));
+      } catch (e) {
+        console.warn("Could not dispatch assistant event", e);
+      }
+setAiMsg(String(reply));
       setAiLoading(false);
+
+      // Save lastAnalysis to localStorage with timestamp & input metadata
+      try {
+        const last = {
+          createdAt: new Date().toISOString(),
+          meta,
+          analysis: first,
+          input: {
+            name: form.name,
+            age: form.age,
+            sex: form.sex,
+            skinType: form.skinType,
+            location: form.location,
+            duration_days: form.duration,
+          },
+        };
+        localStorage.setItem("lastAnalysis", JSON.stringify(last));
+
+        // Send to backend reports/save (best-effort)
+        fetch(`${API_BASE}/reports/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(last),
+        }).catch((err) => console.warn("reports/save failed", err));
+      } catch (e) {
+        console.warn("Could not save lastAnalysis", e);
+      }
     } catch (error) {
       console.error("Analyze error:", error);
       setFormMsg(`Error: ${error.message}`);

@@ -70,6 +70,20 @@ from flask_cors import CORS
 
 CORS(app)
 
+# --- MongoDB client for reports storage (optional) ---
+mongo_client = None
+reports_coll = None
+MONGO_URI = os.getenv("MONGODB_URI") or os.getenv("MONGO_URI")
+if MONGO_URI:
+    try:
+        from pymongo import MongoClient
+
+        mongo_client = MongoClient(MONGO_URI)
+        reports_coll = mongo_client.get_database("skin-images").get_collection("reports")
+        print("[mongo] reports collection ready")
+    except Exception as e:
+        print("[mongo] could not connect:", e)
+
 
 def _strip_exif(img: Image.Image) -> Image.Image:
     try:
@@ -214,6 +228,44 @@ def analyze_skin():
         import traceback
         traceback.print_exc()
         return jsonify(error=f"Analysis failed: {str(e)}"), 500
+
+
+@app.post("/reports/save")
+def save_report():
+    """Save analysis JSON to MongoDB. Accepts JSON body with analysis and metadata."""
+    try:
+        payload = request.get_json(force=True)
+        if not payload:
+            return jsonify(error="JSON body required"), 400
+
+        if reports_coll is None:
+            return jsonify(error="Reports storage not configured"), 503
+
+        # attach timestamp
+        payload["createdAt"] = payload.get("createdAt") or __import__("datetime").datetime.utcnow().isoformat()
+        res = reports_coll.insert_one(payload)
+        return jsonify({"report_id": str(res.inserted_id)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify(error=str(e)), 500
+
+
+@app.get("/reports")
+def list_reports():
+    try:
+        if reports_coll is None:
+            return jsonify([])
+        docs = list(reports_coll.find().sort("createdAt", -1).limit(100))
+        out = []
+        for d in docs:
+            d["id"] = str(d.pop("_id"))
+            out.append(d)
+        return jsonify(out)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify(error=str(e)), 500
 
 
 # Serve other front-end files (about.html, upload.html, team.html, etc.)
