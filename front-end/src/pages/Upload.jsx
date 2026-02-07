@@ -116,6 +116,8 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       const uploadPromises = files.map(async (file) => {
         const formData = new FormData();
         formData.append("image", file);
+        // include page so backend/chat won't KeyError
+        formData.append("page", "upload");
 
         // required by Flask
         formData.append("rapid_change", "false");
@@ -158,7 +160,31 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       const first = results[0];
       if (!first) throw new Error("No analysis results returned.");
 
-      setResult({ meta, raw: first });
+      // Normalize new pipeline response into the shape the UI expects
+      // new response shape: { top_predictions, risk_score, explanation_summary }
+      const normalized = {};
+      normalized.primary_result = first.risk_score ?? null;
+
+      // derive key indicators from risk_score
+      const rs = (first.risk_score || "").toLowerCase();
+      normalized.key_indicators = {
+        high_risk_flag: rs === "high_risk",
+        moderate_risk_flag: rs === "moderate_risk",
+        low_risk_flag: rs === "low_risk",
+        needs_clinician_review: rs === "high_risk",
+      };
+
+      // model_topk expected as [{label, prob}]
+      normalized.model_topk = (first.top_predictions || []).map((p) => ({
+        label: p.label,
+        prob: p.confidence ?? p.prob ?? 0,
+      }));
+
+      // attach explanation/facts for Gemini
+      normalized.facts = first.explanation_summary?.facts || first.explanation_summary || {};
+      normalized.trace = first.explanation_summary?.trace || [];
+
+      setResult({ meta, raw: normalized, raw_full: first });
       setFormMsg(`✓ Analyzed ${results.length} image(s)`);
 
       // 2️⃣ Gemini explanation
@@ -171,6 +197,8 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       );
 
       chatData.append("image", files[0]);
+      // ensure chat endpoint has page value
+      chatData.append("page", "upload");
 
       chatData.append("name", form.name);
       chatData.append("age", String(form.age));
@@ -179,10 +207,10 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       chatData.append("location", form.location);
       chatData.append("duration_days", String(form.duration));
 
-      chatData.append("primary_result", first.primary_result ?? "");
-      chatData.append("facts", JSON.stringify(first.facts ?? {}));
-      chatData.append("model_topk", JSON.stringify(first.model_topk ?? []));
-      chatData.append("trace", JSON.stringify(first.trace ?? []));
+      chatData.append("primary_result", normalized.primary_result ?? "");
+      chatData.append("facts", JSON.stringify(normalized.facts ?? {}));
+      chatData.append("model_topk", JSON.stringify(normalized.model_topk ?? []));
+      chatData.append("trace", JSON.stringify(normalized.trace ?? []));
 
       const chatRes = await fetch(`${API_BASE}/chat?sid=demo`, {
         method: "POST",
@@ -447,6 +475,19 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
                     Needs clinician review:{" "}
                     {String(result.raw.key_indicators?.needs_clinician_review)}
                   </span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <strong>Top Predictions</strong>
+                <div style={{ marginTop: 6 }}>
+                  {(result.raw_full?.top_predictions || result.raw?.model_topk || [])
+                    .slice(0, 5)
+                    .map((p, i) => (
+                      <span key={i} className="pill">
+                        {p.label || p["label"]}: {Number(p.confidence ?? p.prob ?? p["confidence"] ?? p["prob"]).toFixed(3)}
+                      </span>
+                    ))}
                 </div>
               </div>
             </>
