@@ -25,15 +25,32 @@
 
 import os
 import sys
+from pathlib import Path
 from dotenv import load_dotenv
+
+# --- Static path to .env in project root ---
+# Resolves from: expertSystem/app.py -> back-end/src/ -> back-end/ -> Capstone/
+APP_DIR = Path(__file__).resolve().parent
+BACK_END_SRC = APP_DIR.parent
+BACK_END = BACK_END_SRC.parent
+PROJECT_ROOT = BACK_END.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+
+# Load environment variables FIRST from explicit path, before any imports that need them
+if ENV_FILE.exists():
+    load_dotenv(str(ENV_FILE))
+    print(f"[env] Loaded from {ENV_FILE}")
+else:
+    print(f"[env] WARNING: .env not found at {ENV_FILE}, using system env")
+    load_dotenv()
+
 from typing import Dict
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 from expertSystem.chat import ConvState, step as chat_step
 
-load_dotenv()
 # --- Project roots & import path setup ---
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ROOT = BACK_END
 SRC_DIR = os.path.join(ROOT, "src")
 if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
@@ -266,5 +283,7 @@ def chat():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "3720"))
+    # Use BACKEND_PORT if set, else PORT, else default to 3720
+    port = int(os.getenv("BACKEND_PORT") or os.getenv("PORT") or 3720)
+    print(f"[app] Starting Flask on port {port}")
     app.run(host="0.0.0.0", port=port, debug=True)
