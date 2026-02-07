@@ -25,13 +25,13 @@
 
 import os
 import sys
+from dotenv import load_dotenv
 from typing import Dict
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 from expertSystem.chat import ConvState, step as chat_step
-from skinai_analyzer import analyze_skin_lesion
 
-
+load_dotenv()
 # --- Project roots & import path setup ---
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SRC_DIR = os.path.join(ROOT, "src")
@@ -40,6 +40,7 @@ if SRC_DIR not in sys.path:
 
 # Import after sys.path is prepared
 from query import search  # noqa: E402
+from expert_pipeline import run_expert_pipeline  # noqa: E402
 
 FRONT_DIR = os.path.join(ROOT, "front-end")
 DATA_DIR = os.path.join(ROOT, "data")
@@ -108,55 +109,94 @@ def do_query():
 
 @app.post("/analyze_skin")
 def analyze_skin():
-    # multipart/form-data required
-    if "image" not in request.files:
-        return jsonify(error="image file required (field name: 'image')"), 400
-    f = request.files["image"]
-    if not f.filename:
-        return jsonify(error="empty filename"), 400
+    """
+    Endpoint: POST /analyze_skin
+    Required fields:
+    - image (file): skin lesion image
+    - age (int, optional)
+    - sex_at_birth (str, optional): M/F/other
+    - location (str, optional): lesion location
+    - duration_days (int, optional)
+    - rapid_change (bool, optional)
+    - bleeding (bool, optional)
+    - itching (bool, optional)
+    - pain (bool, optional)
 
-    # Intake fields: strings "true"/"false" (case-insensitive)
-    intake_fields = ["rapid_change", "bleeding", "itching", "pain"]
-    intake: dict = {}
-    for field in intake_fields:
-        raw = request.form.get(field)
-        if raw is None:
-            # missing -> treat as False
-            intake[field] = False
-            continue
-        val = raw.strip().lower()
-        if val not in ("true", "false"):
-            return (
-                jsonify(error=f"invalid value for {field}: expected 'true' or 'false'"),
-                400,
-            )
-        intake[field] = val == "true"
+    Returns JSON with:
+    - top_predictions: [{'label': 'mel', 'confidence': 0.62}, ...]
+    - risk_score: 'high_risk' | 'moderate_risk' | 'low_risk'
+    - explanation_summary: structured data for Gemini
+    - follow_up_questions: array of suggested questions (from Gemini chat)
+    """
+    try:
+        # Get image
+        if "image" not in request.files:
+            return jsonify(error="image file required (field name: 'image')"), 400
+        f = request.files["image"]
+        if not f.filename:
+            return jsonify(error="empty filename"), 400
 
-    # For now, use a stubbed top-k model output. TODO: replace with real ML model call.
-    topk = [
-        {"label": "mel", "prob": 0.62},
-        {"label": "nv", "prob": 0.27},
-        {"label": "bkl", "prob": 0.11},
-    ]
+        image_bytes = f.read()
 
-    # Note: we don't use the uploaded image for now; the real model will consume it.
-    result = analyze_skin_lesion(topk, intake)
+        # Extract patient intake fields
+        upload_fields = {
+            "age": request.form.get("age"),
+            "sex_at_birth": request.form.get("sex_at_birth"),
+            "location": request.form.get("location"),
+            "duration_days": request.form.get("duration_days"),
+        }
 
-    facts = result.get("facts", {})
-    resp = {
-        "primary_result": result.get("primary_result"),
-        "key_indicators": {
-            "high_risk_flag": facts.get("high_risk_flag"),
-            "moderate_risk_flag": facts.get("moderate_risk_flag"),
-            "low_risk_flag": facts.get("low_risk_flag"),
-            "needs_clinician_review": facts.get("needs_clinician_review"),
-        },
-        "facts": facts,
-        "trace": result.get("trace", []),
-        "model_topk": topk,
-    }
+        # Extract chat/symptom flags
+        chat_flags = {
+            "rapid_change": request.form.get("rapid_change"),
+            "bleeding": request.form.get("bleeding"),
+            "itching": request.form.get("itching"),
+            "pain": request.form.get("pain"),
+        }
 
-    return jsonify(resp)
+        # Run the expert pipeline
+        pipeline_result = run_expert_pipeline(
+            image_bytes=image_bytes,
+            upload_fields=upload_fields,
+            chat_flags=chat_flags,
+        )
+
+        # Extract and structure the response
+        topk = pipeline_result["ml"]["topK"]
+        reasoning = pipeline_result["reasoning"]
+        explanation_seed = pipeline_result["explanation_seed"]
+
+        # Format top predictions with confidence scores
+        top_predictions = [
+            {"label": pred["label"], "confidence": round(pred["prob"], 3)}
+            for pred in topk
+        ]
+
+        # Determine risk score
+        risk_score = reasoning["primary_result"]
+
+        # Build response
+        response = {
+            "top_predictions": top_predictions,
+            "risk_score": risk_score,
+            "explanation_summary": explanation_seed,
+            "follow_up_questions": [
+                "Has this lesion been changing in size or color?",
+                "Do you have a family history of skin cancer?",
+                "When did you first notice this lesion?",
+            ],
+            "_debug": {
+                "reasoning_facts": reasoning["facts"],
+                "reasoning_trace": reasoning["trace"],
+            },
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify(error=f"Analysis failed: {str(e)}"), 500
 
 
 # Serve other front-end files (about.html, upload.html, team.html, etc.)
