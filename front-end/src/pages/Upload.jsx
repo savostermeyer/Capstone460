@@ -19,6 +19,19 @@ export default function Upload() {
   });
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
+  // Persistent session id (shared with chatbot widget)
+  const sid = useMemo(() => {
+    try {
+      let existing = localStorage.getItem("skinai_sid");
+      if (!existing) {
+        existing = "sid_" + Math.random().toString(36).substring(2);
+        localStorage.setItem("skinai_sid", existing);
+      }
+      return existing;
+    } catch {
+      return "sid_" + Math.random().toString(36).substring(2);
+    }
+  }, []);
   const [formMsg, setFormMsg] = useState("");
   const [result, setResult] = useState(null); // demo result object
 
@@ -135,7 +148,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
         formData.append("consent", String(form.consent));
         formData.append("uploadDate", new Date().toISOString());
 
-        const response = await fetch(`${API_BASE}/analyze_skin`, {
+        const response = await fetch(`${API_BASE}/analyze_skin?sid=${encodeURIComponent(sid)}`, {
           method: "POST",
           body: formData,
         });
@@ -159,6 +172,32 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       const meta = `${results.length} image(s) analyzed • ${now.toLocaleString()}`;
       const first = results[0];
       if (!first) throw new Error("No analysis results returned.");
+
+      // If backend returned the seeded assistant explanation, dispatch it into the chat widget
+      try {
+        const seedText = first.assistant_seed || first.explanation_summary?.text || "";
+        if (seedText) {
+          console.debug(
+            "[Upload] Dispatching assistant seed to chatbot widget:",
+            seedText.substring(0, 100)
+          );
+          const dispatched = window.dispatchEvent(
+            new CustomEvent("skinai:assistantMessage", {
+              detail: String(seedText),
+              bubbles: true,
+              composed: true,
+            })
+          );
+          console.debug("[Upload] dispatchEvent returned:", dispatched);
+          window.dispatchEvent(
+            new CustomEvent("skinai:open", { bubbles: true, composed: true })
+          );
+        } else {
+          console.warn("[Upload] No assistant_seed found in response");
+        }
+      } catch (e) {
+        console.warn("Could not dispatch assistant seed", e);
+      }
 
       // Normalize new pipeline response into the shape the UI expects
       // new response shape: { top_predictions, risk_score, explanation_summary }
@@ -212,7 +251,8 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       chatData.append("model_topk", JSON.stringify(normalized.model_topk ?? []));
       chatData.append("trace", JSON.stringify(normalized.trace ?? []));
 
-      const chatRes = await fetch(`${API_BASE}/chat?sid=demo`, {
+      // Send the follow-up prompt to the chat endpoint using the same persistent SID
+      const chatRes = await fetch(`${API_BASE}/chat?sid=${encodeURIComponent(sid)}`, {
         method: "POST",
         body: chatData,
       });
@@ -220,19 +260,29 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
       const chatJson = await chatRes.json();
       const reply =
         chatJson.reply || chatJson.message || chatJson.assistant || chatJson.text || "";
-        setAiMsg(String(reply));
+      setAiMsg(String(reply));
 
       // Dispatch assistant reply to chat widget and open it
       try {
-        window.dispatchEvent(
-          new CustomEvent("skinai:assistantMessage", { detail: String(reply) }),
+        console.debug(
+          "[Upload] Dispatching Gemini reply to chatbot widget:",
+          reply.substring(0, 100)
         );
+        const dispatched = window.dispatchEvent(
+          new CustomEvent("skinai:assistantMessage", {
+            detail: String(reply),
+            bubbles: true,
+            composed: true,
+          })
+        );
+        console.debug("[Upload] dispatchEvent returned:", dispatched);
         // signal the chat to open
-        window.dispatchEvent(new CustomEvent("skinai:open"));
+        window.dispatchEvent(
+          new CustomEvent("skinai:open", { bubbles: true, composed: true })
+        );
       } catch (e) {
         console.warn("Could not dispatch assistant event", e);
       }
-setAiMsg(String(reply));
       setAiLoading(false);
 
       // Save lastAnalysis to localStorage with timestamp & input metadata
@@ -528,16 +578,7 @@ setAiMsg(String(reply));
             </>
           )}
         </div>
-        <div className="card" style={{ marginTop: 12 }}>
-          <h3>AI Explanation</h3>
-          {aiLoading ? (
-            <p className="muted">Thinking…</p>
-          ) : (
-            <p style={{ whiteSpace: "pre-wrap" }}>
-              {aiMsg || "No AI message yet."}
-            </p>
-          )}
-        </div>
+        {/* AI explanation moved into chatbot window; assistant message is dispatched to widget */}
       </section>
     </main>
   );

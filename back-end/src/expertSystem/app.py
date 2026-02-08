@@ -50,6 +50,10 @@ from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 from expertSystem.chat import ConvState, step as chat_step
 
+# ---------- Chatbot wiring ----------
+
+# hold per-session state in memory for dev; switch to a store later
+_SESS: Dict[str, ConvState] = {}
 # --- Project roots & import path setup ---
 ROOT = BACK_END
 SRC_DIR = os.path.join(ROOT, "src")
@@ -95,6 +99,8 @@ def _strip_exif(img: Image.Image) -> Image.Image:
         pass
     out = Image.new(img.mode, img.size)
     out.putdata(list(img.getdata()))
+    
+    
     return out
 
 
@@ -141,6 +147,27 @@ def do_query():
 
     return jsonify(out)
 
+def _analysis_to_chat_message(pipeline_result: dict) -> str:
+    seed = pipeline_result.get("explanation_seed", {}) or {}
+    topk = pipeline_result.get("ml", {}).get("topK", []) or []
+
+    primary = (seed.get("primary_result") or "unknown").replace("_", " ")
+    disclaimer = seed.get(
+        "disclaimer",
+        "This is not medical advice. This is a preliminary AI-assisted analysis."
+    )
+
+    preds = ", ".join(
+        [f"{p['label']}: {p['prob']:.4f}" for p in topk]
+    )
+
+    return (
+        f"{disclaimer}\n\n"
+        f"Preliminary result: {primary}\n"
+        f"Top predictions: {preds}\n\n"
+        "To improve accuracy, I have one quick question:\n"
+        "Where on the body is this located? (e.g., left forearm)"
+    )
 
 @app.post("/analyze_skin")
 def analyze_skin():
@@ -180,6 +207,7 @@ def analyze_skin():
             "location": request.form.get("location"),
             "duration_days": request.form.get("duration_days"),
         }
+        
 
         # Extract chat/symptom flags
         chat_flags = {
@@ -196,6 +224,18 @@ def analyze_skin():
             chat_flags=chat_flags,
             predictor=KerasResNetPredictor(),  
         )
+        # ---- Seed chatbot with analysis explanation ----
+        sid = request.args.get("sid") or request.form.get("sid") or "demo"
+        st = _SESS.get(sid) or ConvState()
+
+        chat_message = _analysis_to_chat_message(pipeline_result)
+
+        st.history.append({
+            "role": "model",
+            "parts": [{"text": chat_message}]
+        })
+
+        _SESS[sid] = st
 
         # Extract and structure the response
         topk = pipeline_result["ml"]["topK"]
@@ -216,6 +256,8 @@ def analyze_skin():
             "top_predictions": top_predictions,
             "risk_score": risk_score,
             "explanation_summary": explanation_seed,
+            # include the assistant-friendly explanation text that was seeded into the session
+            "assistant_seed": chat_message,
             "follow_up_questions": [
                 "Has this lesion been changing in size or color?",
                 "Do you have a family history of skin cancer?",
@@ -234,6 +276,7 @@ def analyze_skin():
 
         traceback.print_exc()
         return jsonify(error=f"Analysis failed: {str(e)}"), 500
+
 
 
 @app.post("/reports/save")
@@ -288,10 +331,6 @@ def static_pages(path):
         return jsonify(error=f"{path} not found"), 404
 
 
-# ---------- Chatbot wiring ----------
-
-# hold per-session state in memory for dev; switch to a store later
-_SESS: Dict[str, ConvState] = {}
 
 
 @app.post("/chat")
