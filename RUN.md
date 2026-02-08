@@ -21,3 +21,7 @@ python -m expertSystem.app
 cd front-end
 npm install
 npm run dev
+
+# Running server.js for login
+
+node server.js
