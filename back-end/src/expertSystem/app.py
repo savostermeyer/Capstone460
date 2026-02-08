@@ -26,6 +26,7 @@
 import os
 import sys
 from pathlib import Path
+from keras_predictor import KerasResNetPredictor
 from dotenv import load_dotenv
 
 # --- Static path to .env in project root ---
@@ -79,7 +80,9 @@ if MONGO_URI:
         from pymongo import MongoClient
 
         mongo_client = MongoClient(MONGO_URI)
-        reports_coll = mongo_client.get_database("skin-images").get_collection("reports")
+        reports_coll = mongo_client.get_database("skin-images").get_collection(
+            "reports"
+        )
         print("[mongo] reports collection ready")
     except Exception as e:
         print("[mongo] could not connect:", e)
@@ -98,6 +101,7 @@ def _strip_exif(img: Image.Image) -> Image.Image:
 @app.get("/")
 def index():
     return send_from_directory(FRONT_DIR, "index.html")
+
 
 #   to run demo code:
 #   return send_from_directory(EXP_DIR, "indexdemo.html")  # <- fixed indent
@@ -190,6 +194,7 @@ def analyze_skin():
             image_bytes=image_bytes,
             upload_fields=upload_fields,
             chat_flags=chat_flags,
+            predictor=KerasResNetPredictor(),  
         )
 
         # Extract and structure the response
@@ -226,6 +231,7 @@ def analyze_skin():
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return jsonify(error=f"Analysis failed: {str(e)}"), 500
 
@@ -242,11 +248,15 @@ def save_report():
             return jsonify(error="Reports storage not configured"), 503
 
         # attach timestamp
-        payload["createdAt"] = payload.get("createdAt") or __import__("datetime").datetime.utcnow().isoformat()
+        payload["createdAt"] = (
+            payload.get("createdAt")
+            or __import__("datetime").datetime.utcnow().isoformat()
+        )
         res = reports_coll.insert_one(payload)
         return jsonify({"report_id": str(res.inserted_id)})
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return jsonify(error=str(e)), 500
 
@@ -264,6 +274,7 @@ def list_reports():
         return jsonify(out)
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return jsonify(error=str(e)), 500
 
@@ -312,18 +323,20 @@ def chat():
             error_str = str(e)
             # Detect 429 (Resource exhausted / rate limit) errors
             if "429" in error_str or "Resource exhausted" in error_str:
-                print(f"[CHAT] 429 Resource exhausted (history size: {len(st.history)})")
+                print(
+                    f"[CHAT] 429 Resource exhausted (history size: {len(st.history)})"
+                )
                 print(f"[CHAT] Consider reducing context or using a faster model.")
                 out = {
                     "reply": "The AI service is temporarily overloaded. Please wait a moment and try again.",
                     "message": "Service overloaded (429)",
                     "assistant": "[Retry later]",
                     "text": "[Service busy]",
-                    "error_code": "RATE_LIMIT"
+                    "error_code": "RATE_LIMIT",
                 }
             else:
                 raise
-        
+
         _SESS[sid] = st
         print(f"[CHAT] History size after: {len(st.history)} messages")
 
@@ -344,6 +357,7 @@ def chat():
     except Exception as e:
         # Log full traceback to console for debugging
         import traceback
+
         traceback.print_exc()
         msg = f"Server error: {e}"
         # Keep 200 so the frontend can render the message in the chat bubble
@@ -369,6 +383,7 @@ def chat_reset():
             return jsonify({"message": "Session not found or already cleared"}), 404
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
