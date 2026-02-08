@@ -27,15 +27,9 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     }
   }, []);
 
-  
-  // Backend URL from environment variable, defaults to localhost:3720
-  const backendChatPort = import.meta.env.VITE_BACKEND_CHAT_PORT || "3720";
-  // Use current host if localhost to ensure proper connectivity
-  const backendHost =
-    window.location.hostname === "localhost"
-      ? "localhost"
-      : window.location.hostname;
-  const [backendUrl, setBackendUrl] = useState(`/chat?sid=${sid}`);
+  // Backend API base URL from environment, fallback to localhost:3720
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
+  const [backendUrl, setBackendUrl] = useState(`${API_BASE}/chat?sid=${sid}`);
 
   // Open state (persisted)
   const [open, setOpen] = useState(() => {
@@ -201,11 +195,11 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
       localStorage.setItem(STORAGE_SID, freshSid);
     } catch {}
 
-    setBackendUrl(`/chat?sid=${freshSid}`);
+    setBackendUrl(`${API_BASE}/chat?sid=${freshSid}`);
 
     // Also notify backend to clear the old session (helps with rate limits)
     if (oldSid) {
-      fetch(`/chat/reset?sid=${encodeURIComponent(oldSid)}`, {
+      fetch(`${API_BASE}/chat/reset?sid=${encodeURIComponent(oldSid)}`, {
         method: "POST",
       }).catch((e) => console.warn("Could not reset backend session:", e));
     }
