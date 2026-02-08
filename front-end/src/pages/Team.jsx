@@ -1,4 +1,8 @@
-import { useState } from "react";
+import damianPic from "../assets/damianpic.jpeg";
+import sriPic from "../assets/sripic.jpeg";
+import savPic from "../assets/savpic.jpeg";
+import mannyPic from "../assets/mannypic.jpeg";
+import maddiePic from "../assets/maddiepic.jpeg";
 
 const teamMembers = [
   { id: "dw", name: "Damian Williams", role: "Team Lead · Back End", description: "Leads the backend development and system architecture with expertise in machine learning and API design." },
@@ -9,22 +13,16 @@ const teamMembers = [
 ];
 
 export default function Team() {
-  const [images, setImages] = useState({});
-
-  const handleImageUpload = (memberId, event) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setImages(prev => ({
-          ...prev,
-          [memberId]: e.target.result
-        }));
-      };
-      reader.readAsDataURL(file);
-    }
+  const images = {
+    dw: damianPic,
+    sy: sriPic,
+    so: savPic,
+    mng: mannyPic,
+    ms: maddiePic
   };
 
+  const topMembers = teamMembers.slice(0, 3);
+  const bottomMembers = teamMembers.slice(3);
   return (
     <main className="container">
       <section className="section-pad" aria-labelledby="team-title">
@@ -46,85 +44,94 @@ export default function Team() {
           Meet the talented team members behind this project with expertise in backend development, frontend design, and machine learning.
         </p>
 
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: "30px",
-          maxWidth: "1200px",
-          margin: "0 auto"
-        }}>
-          {teamMembers.map(member => (
-            <div key={member.id} style={{
-              background: "var(--gold)",
-              border: "1px solid var(--border)",
-              borderRadius: "12px",
-              padding: "20px",
-              textAlign: "center",
-              boxShadow: "var(--shadow)"
-            }}>
-              <div style={{
-                width: "150px",
-                height: "150px",
-                borderRadius: "12px",
-                background: "#1d1d1d",
-                margin: "0 auto 20px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+        <div style={{ maxWidth: 1500, margin: "0 auto", padding: 24 }}>
+          {/* Top row: 3 cards */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(260px, 1fr))",
+            gap: 36,
+            marginBottom: 28
+          }}>
+            {topMembers.map(member => (
+              <div key={member.id} style={{
+                border: "2px solid #d4af8a",
+                borderRadius: 14,
+                padding: 0,
+                textAlign: "left",
+                boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
                 overflow: "hidden",
-                position: "relative",
-                cursor: "pointer",
-                border: "2px solid #2a2a2a"
+                transition: "transform 0.22s ease, boxShadow 0.22s ease",
+                cursor: "default",
+                display: "flex",
+                flexDirection: "column",
+                height: 520,
+                background: "#fff"
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-6px)";
+                e.currentTarget.style.boxShadow = "0 12px 30px rgba(0,0,0,0.18)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.15)";
               }}>
-                {images[member.id] ? (
-                  <>
-                    <img 
-                      src={images[member.id]} 
-                      alt={member.name} 
-                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    />
-                    <label htmlFor={`upload-${member.id}`} style={{
-                      position: "absolute",
-                      inset: 0,
-                      background: "rgba(0,0,0,0.5)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      opacity: 0,
-                      transition: "opacity 0.3s ease",
-                      cursor: "pointer",
-                      fontSize: "0.8rem",
-                      color: "#E0C98D"
-                    }} 
-                    onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
-                    onMouseLeave={(e) => e.currentTarget.style.opacity = "0"}
-                    >
-                      Change Photo
-                    </label>
-                  </>
-                ) : (
-                  <label htmlFor={`upload-${member.id}`} style={{
-                    cursor: "pointer",
-                    color: "#C9C9C9",
-                    textAlign: "center",
-                    padding: "20px",
-                    fontSize: "0.85rem"
-                  }}>
-                    Click to upload photo
-                  </label>
-                )}
-                <input 
-                  id={`upload-${member.id}`}
-                  type="file" 
-                  accept="image/*"
-                  onChange={(e) => handleImageUpload(member.id, e)}
-                  style={{ display: "none" }}
-                />
+                <div style={{ width: "100%", height: 420, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                  <img src={images[member.id]} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 20%", display: "block" }} />
+                </div>
+                <div style={{ background: "#f5e6d3", padding: "18px 16px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                  <h3 style={{ margin: 0, color: "#111", fontSize: "1.15rem", fontWeight: 800 }}>{member.name}</h3>
+                  <p style={{ margin: "6px 0 0 0", color: "#422d00", fontWeight: 600, fontSize: "0.9rem" }}>{member.role}</p>
+                </div>
               </div>
-              <h3 style={{ margin: "15px 0 5px", color: "#111" }}>{member.name}</h3>
-              <p style={{ color: "#422d00", fontWeight: "600", fontSize: "0.95rem", margin: "0 0 15px" }}>{member.role}</p>
+            ))}
+          </div>
+
+          {/* Bottom row: centered 2 cards */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr minmax(640px, 1fr) 1fr",
+            gap: 36,
+            alignItems: "start"
+          }}>
+            <div />
+            <div style={{ display: "flex", gap: 36, justifyContent: "center" }}>
+              {bottomMembers.map(member => (
+                <div key={member.id} style={{
+                  width: "100%",
+                  maxWidth: 320,
+                  border: "2px solid #d4af8a",
+                  borderRadius: 14,
+                  padding: 0,
+                  textAlign: "left",
+                  boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+                  overflow: "hidden",
+                  transition: "transform 0.22s ease, boxShadow 0.22s ease",
+                  cursor: "default",
+                  display: "flex",
+                  flexDirection: "column",
+                  height: 520,
+                  background: "#fff"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-6px)";
+                  e.currentTarget.style.boxShadow = "0 12px 30px rgba(0,0,0,0.18)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.15)";
+                }}>
+                  <div style={{ width: "100%", height: 420, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                    <img src={images[member.id]} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 20%", display: "block" }} />
+                  </div>
+                  <div style={{ background: "#f5e6d3", padding: "20px 18px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    <h3 style={{ margin: 0, color: "#111", fontSize: "1.2rem", fontWeight: 800 }}>{member.name}</h3>
+                    <p style={{ margin: "8px 0 0 0", color: "#422d00", fontWeight: 600, fontSize: "0.95rem" }}>{member.role}</p>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+            <div />
+          </div>
         </div>
       </section>
     </main>
