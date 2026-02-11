@@ -3,11 +3,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const STORAGE_HISTORY = "skinai_chat_history";
 const STORAGE_OPEN = "skinai_chat_open";
 const STORAGE_SID = "skinai_sid";
+console.log("🔥 ChatbotWidget loaded from:", import.meta.url);
 
 function newSid() {
   return "sid_" + Math.random().toString(36).substring(2);
 }
 
+if (!window.__skinaiChatLock) {
+  window.__skinaiChatLock = false;
+}
 export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
   // SID (persisted)
   const sid = useMemo(() => {
@@ -23,10 +27,9 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     }
   }, []);
 
-  // Backend URL (exactly like your original)
-  const [backendUrl, setBackendUrl] = useState(
-    `http://127.0.0.1:3720/chat?sid=${sid}`
-  );
+  // Backend API base URL from environment, fallback to localhost:3720
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
+  const [backendUrl, setBackendUrl] = useState(`${API_BASE}/chat?sid=${sid}`);
 
   // Open state (persisted)
   const [open, setOpen] = useState(() => {
@@ -46,8 +49,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
         return [
           {
             type: "bot",
-            text:
-              "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
+            text: "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
           },
         ];
       }
@@ -56,8 +58,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
       return [
         {
           type: "bot",
-          text:
-            "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
+          text: "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
         },
       ];
     }
@@ -88,6 +89,97 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, open]);
 
+  // ⚡ BULLETPROOF listener: survives StrictMode double-invoke by attaching directly to window at module level
+  // (keeps reference even if component remounts)
+  if (!window.__skinaiListenersAttached) {
+    console.log("🔧 [ChatbotWidget] Attaching global window listeners (one-time)");
+    window.__skinaiListenersAttached = true;
+
+    // Direct reference to trigger message addition
+    window.__skinaiAddMessage = (text) => {
+      if (!text || typeof text !== "string" || !text.trim()) {
+        console.warn(
+          "[ChatbotWidget] Received invalid message text:",
+          typeof text,
+          text
+        );
+        return false;
+      }
+      // Trigger via custom event that React component listens for
+      const evt = new CustomEvent("__skinai:addMessageInternal", {
+        detail: { text, timestamp: Date.now() },
+      });
+      window.dispatchEvent(evt);
+      console.debug("[ChatbotWidget] Queued internal add for:", text.substring(0, 50));
+      return true;
+    };
+
+    window.addEventListener("skinai:assistantMessage", (e) => {
+      try {
+        console.log("[EVENT] skinai:assistantMessage received:", {
+          detailType: typeof e.detail,
+          detailLength: e.detail?.length ?? "N/A",
+        });
+
+        const text =
+          typeof e.detail === "string"
+            ? e.detail
+            : e.detail?.text || e.detail?.message || e.detail?.reply
+            ? e.detail.text || e.detail.message || e.detail.reply
+            : JSON.stringify(e.detail);
+
+        if (!text || !String(text).trim()) {
+          console.warn("[EVENT] skinai:assistantMessage text was empty, ignoring");
+          return;
+        }
+
+        console.log(
+          "[EVENT] skinai:assistantMessage → calling __skinaiAddMessage"
+        );
+        window.__skinaiAddMessage(String(text));
+        window.dispatchEvent(new CustomEvent("skinai:open"));
+      } catch (err) {
+        console.error("[EVENT] skinai:assistantMessage handler error:", err);
+      }
+    });
+
+    window.addEventListener("skinai:open", () => {
+      console.log("[EVENT] skinai:open received");
+      const evt = new CustomEvent("__skinai:openInternal");
+      window.dispatchEvent(evt);
+    });
+  }
+
+  // Component listens for the internal queued messages
+  useEffect(() => {
+    function onAddMessageInternal(e) {
+      const { text } = e.detail || {};
+      if (text) {
+        console.debug(
+          "[ChatbotWidget] onAddMessageInternal adding message:",
+          text
+        );
+        setMessages((prev) => [...prev, { type: "bot", text }]);
+      }
+    }
+
+    function onOpenInternal() {
+      console.debug("[ChatbotWidget] onOpenInternal setting open=true");
+      setOpen(true);
+    }
+
+    window.addEventListener("__skinai:addMessageInternal", onAddMessageInternal);
+    window.addEventListener("__skinai:openInternal", onOpenInternal);
+
+    return () => {
+      window.removeEventListener(
+        "__skinai:addMessageInternal",
+        onAddMessageInternal
+      );
+      window.removeEventListener("__skinai:openInternal", onOpenInternal);
+    };
+  }, []);
+
   function addMessage(text, type) {
     setMessages((prev) => [...prev, { text, type }]);
   }
@@ -97,12 +189,20 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
       localStorage.removeItem(STORAGE_HISTORY);
     } catch {}
 
+    const oldSid = sid;
     const freshSid = newSid();
     try {
       localStorage.setItem(STORAGE_SID, freshSid);
     } catch {}
 
-    setBackendUrl(`http://127.0.0.1:3720/chat?sid=${freshSid}`);
+    setBackendUrl(`${API_BASE}/chat?sid=${freshSid}`);
+
+    // Also notify backend to clear the old session (helps with rate limits)
+    if (oldSid) {
+      fetch(`${API_BASE}/chat/reset?sid=${encodeURIComponent(oldSid)}`, {
+        method: "POST",
+      }).catch((e) => console.warn("Could not reset backend session:", e));
+    }
 
     setMessages([
       { type: "bot", text: "🔄 Chat reset. You can start a new conversation." },
@@ -112,7 +212,11 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
 
   async function sendMessage() {
     const text = input.trim();
-    if (!text || busy) return;
+
+    // HARD guard (prevents double fire)
+    if (!text || busy || window.__skinaiChatLock) return;
+
+    window.__skinaiChatLock = true;
 
     addMessage(text, "user");
     setInput("");
@@ -120,33 +224,78 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
 
     const formData = new FormData();
     formData.append("text", text);
+    formData.append("page", "chat");
 
-    try {
-      const res = await fetch(backendUrl, {
-        method: "POST",
-        body: formData,
-      });
+    // Exponential backoff retry for rate-limit errors
+    const maxRetries = 3;
+    let attempt = 0;
+    let lastError = null;
 
-      const data = await res.json();
+    while (attempt < maxRetries) {
+      try {
+        const res = await fetch(backendUrl, {
+          method: "POST",
+          body: formData,
+        });
 
-      const reply =
-        data.reply ||
-        data.message ||
-        data.text ||
-        data.assistant ||
-        "[No reply]";
+        const data = await res.json();
 
-      addMessage(String(reply), "bot");
-    } catch (err) {
-      console.error(err);
-      addMessage("Error: Unable to connect to AI assistant.", "bot");
-    } finally {
-      setBusy(false);
+        // Check if backend returned a rate-limit error
+        if (data.error_code === "RATE_LIMIT" || (data.error && data.error.includes("429"))) {
+          lastError = data;
+          attempt++;
+          if (attempt < maxRetries) {
+            // Longer exponential backoff: 2s, 4s, 8s (give API more time to recover)
+            const waitMs = Math.pow(2, attempt) * 1000;
+            console.warn(
+              `Rate limit detected. Retrying in ${waitMs / 1000}s (attempt ${attempt}/${maxRetries})`
+            );
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            continue;
+          }
+        }
+
+        const reply =
+          data.reply ||
+          data.message ||
+          data.text ||
+          data.assistant ||
+          "[No reply]";
+
+        addMessage(String(reply), "bot");
+        // Success, exit retry loop
+        attempt = maxRetries;
+      } catch (err) {
+        lastError = err;
+        attempt++;
+        if (attempt < maxRetries) {
+          const waitMs = Math.pow(2, attempt) * 1000;
+          console.warn(
+            `Request failed. Retrying in ${waitMs / 1000}s (attempt ${attempt}/${maxRetries}):`,
+            err
+          );
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          continue;
+        }
+      }
     }
+
+    // Final error handling if all retries exhausted
+    if (attempt >= maxRetries && lastError) {
+      console.error("Max retries exceeded:", lastError);
+      addMessage(
+        "The assistant is temporarily unavailable. Please try again in a few moments or reset the conversation.",
+        "bot",
+      );
+    }
+
+    // Always clean up: release lock and clear busy state
+    setBusy(false);
+    window.__skinaiChatLock = false;
   }
 
   function onKeyDown(e) {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !busy && !window.__skinaiChatLock) {
       e.preventDefault();
       sendMessage();
     }

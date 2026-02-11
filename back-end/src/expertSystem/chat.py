@@ -37,6 +37,7 @@ print("[dotenv] file:", find_dotenv(usecwd=True))
 print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
 
 import google.generativeai as genai
+import time
 from collections.abc import Mapping
 
 
@@ -81,6 +82,16 @@ print(f"[Gemini] Using model: {MODEL_NAME}")
 @dataclass
 class ConvState:
     history: List[Dict[str, Any]] = field(default_factory=list)
+    
+    def trim_history(self, max_turns: int = 10):
+        """
+        Keep only the most recent N turns to prevent unbounded token growth.
+        Each 'turn' is typically 2 messages (user + model reply).
+        """
+        max_messages = max_turns * 2
+        if len(self.history) > max_messages:
+            # Keep only the last N messages; discard old context
+            self.history = self.history[-max_messages:]
 
 # ---- Tool declaration (use lowercase JSON Schema types) ----
 FUNCTIONS = [{
@@ -140,11 +151,18 @@ FUNCTIONS = [{
 SYSTEM_INSTRUCTION = (
   "You are a dermatologist intake assistant in a research prototype. "
   "Gather focused clinical information and provide risk-oriented guidance—NOT a diagnosis. "
-  "Always say you are not a doctor and this is not medical advice.\n\n"
+  "This tool does not provide medical diagnosis or treatment. I am an AI, not a doctor. "
+  "Always recommend consulting a licensed clinician for medical decisions.\n\n"
+
+  "CONVERSATION RULES:\n"
+  "• NEVER repeat questions the user has already answered in this conversation.\n"
+  "• Track what information you already have (body site, size, changes, colors, symptoms, age, skin type).\n"
+  "• Build naturally on previous answers; reference what they told you.\n"
+  "• Do NOT say 'I am an AI' or 'I cannot provide medical advice' more than once per conversation.\n\n"
 
   "QUESTION STYLE (patient-friendly):\n"
   "• Avoid numbers/scales unless the user already gave them. Use plain language + examples.\n"
-  "• Ask 1–2 questions per turn. Offer simple choices and 'Not sure'.\n"
+  "• Ask 1 question per turn. Offer simple choices and 'Not sure'.\n"
   "• Examples:\n"
   "  - Asymmetry → 'Do both halves look the same if you imagine folding it?' (Yes / No / Not sure)\n"
   "  - Border → 'Edges smooth like a circle/oval, or uneven/jagged?' (Smooth / Uneven / Not sure)\n"
@@ -160,22 +178,22 @@ SYSTEM_INSTRUCTION = (
   "• pain_0_10: none→0, mild→2, moderate→5, severe→8 (approximate verbal scales)\n"
   "• itching_0_10: none→0, mild→2, moderate→5, severe→8\n"
   "• evolution_speed: No/Stable→'stable', A little→'slow', A lot→'rapid'\n"
-  "• If unsure, leave the field null and ask at most one key follow-up next turn.\n\n"
+  "• If unsure, leave the field null and ask only ONE key follow-up next turn.\n\n"
 
   "TOOL USE:\n"
   "• When you have body_site + diameter_mm + change status + at least some ABCDE/symptoms, call expert_derm_consult. "
-  "Otherwise ask the single most important missing question.\n\n"
+  "Otherwise ask the single most important MISSING question.\n\n"
 
   "STYLE:\n"
-  "• Be concise and supportive; use brief bullets for findings/next steps. "
+  "• Be concise and natural; avoid repetition. Use brief bullets for findings/next steps. "
   "• If high-risk features (rapid change, bleeding, ulceration, diameter ≥ 6 mm, clearly uneven edges/colors), "
-  "If given diagnose or prescribe treatment, give a warning that you are an AI and not a replacement for a medical professional. "
   "recommend prompt in-person evaluation.\n"
 )
 
 # Lazy model init with fallbacks (no network on import)
+# PRIORITY: Use preferred model first (from .env), then try alternatives if available
 PREFERRED = MODEL_NAME
-CANDIDATES = [PREFERRED, "gemini-1.5-flash-8b", "gemini-1.5-pro"]
+CANDIDATES = [PREFERRED, "gemini-1.5-flash-8b", "gemini-1.5-flash", "gemini-1.5-pro"]
 
 MODEL = None
 MODEL_NAME = PREFERRED  # keep name updated once we pick one
@@ -284,13 +302,14 @@ def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
     if payload.get("diameter_mm") is None:
         needed.append("What is the largest diameter in millimeters?")
     if payload.get("evolution_speed") is None:
-        needed.append("Has it been changing? stable, slow, moderate, or rapid?")
-    if payload.get("bleeding") is None:
+        needed.append("Has it been changing? (stable, slow, moderate, or rapid)")
+    if payload.get("bleeding") is None and not needed:  # Only ask if we don't have critical info
         needed.append("Has it bled or crusted?")
-    if payload.get("number_of_colors") is None:
-        needed.append("Roughly how many colors do you see (1,2,≥3)?")
-    out["next_questions"] = needed[:3]
-
+    if payload.get("number_of_colors") is None and not needed:  # Only ask if we don't have critical info
+        needed.append("Roughly how many colors do you see (1, 2, or 3+)?")
+    
+    out["next_questions"] = needed[:1]  # Ask only 1 question at a time (was 3)
+    
     return out
 
 def _format_tool_reply(payload: Dict[str, Any]) -> str:
@@ -328,6 +347,34 @@ def _resp_text(resp) -> str:
         pass
     return (getattr(resp, "text", None) or "").strip()
 
+
+# ---- API call retry helper ----
+def _retry_api_call(fn, *args, max_retries: int = 4, base_delay: float = 1.0):
+    """
+    Call `fn(*args)` with an exponential backoff retry for transient rate-limit/resource errors.
+    Retries when the exception message contains indicators of rate limiting (429 / Resource exhausted).
+    On final failure the exception is propagated.
+    """
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return fn(*args)
+        except Exception as e:
+            last_err = e
+            msg = str(e) or ""
+            is_rate = ("429" in msg) or ("resource exhausted" in msg.lower()) or ("rate limit" in msg.lower())
+            if not is_rate:
+                # Non-rate errors should not be retried
+                raise
+            if attempt == max_retries:
+                # give up and re-raise the last exception
+                raise
+            delay = base_delay * (2 ** (attempt - 1))
+            print(f"[retry] attempt {attempt} failed: {msg[:180]} -- sleeping {delay}s")
+            time.sleep(delay)
+    # if somehow we exit loop
+    raise last_err
+
 # ---- Main step ----
 def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dict[str,Any]]=None) -> Dict[str, Any]:
     
@@ -351,7 +398,7 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             parts.append(f"Patient: {metadata['name']}")
             
         if metadata.get("age"):
-            parts.append(f"Age: {metadata['page']}")
+            parts.append(f"Age: {metadata['age']}")
             
         if metadata.get("fitzpatrick"):
             parts.append(f"Skin type: {metadata['fitzpatrick']}")
@@ -371,23 +418,60 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             user_text = summary_text + "\n\nUser notes: " + user_text
         else:
             user_text = summary_text
-            
     
-    # start the model char
+    # Build a summary of what we already know from conversation history
+    # This helps the model avoid repeating questions
+    context_summary = ""
+    if len(state.history) > 0:
+        # Extract key data points from conversation
+        known_info = []
+        conversation_text = " ".join([msg.get("parts", [{}])[0].get("text", "") for msg in state.history])
+        
+        # Check for previously mentioned information
+        if any(word in conversation_text.lower() for word in ["forearm", "arm", "leg", "ankle", "shin", "calf", "back", "chest", "face", "palm"]):
+            known_info.append("(We know the body location)")
+        if any(word in conversation_text.lower() for word in ["mm", "millimeter", "millimeters", "pencil", "eraser"]):
+            known_info.append("(We know the diameter)")
+        if any(word in conversation_text.lower() for word in ["changing", "changed", "growing", "stable"]):
+            known_info.append("(We know about changes)")
+        if any(word in conversation_text.lower() for word in ["color", "colors", "brown", "red", "black"]):
+            known_info.append("(We know about colors)")
+            
+        if known_info:
+            context_summary = f"\n\n[Context: {' '.join(known_info)}]"
+    
+    # start the model chat
+    # BEFORE: Trim old history to prevent unbounded token growth (issue at diagnostic stage)
+    initial_history_size = len(state.history)
+    state.trim_history(max_turns=10)  # Keep ~20 messages (10 turns)
+    trimmed_history_size = len(state.history)
+    print(f"[step] History trimmed: {initial_history_size} → {trimmed_history_size} messages")
+    
+    # Append context summary to current message to help model track state
+    if context_summary and user_text:
+        user_text = user_text + context_summary
+    
     chat = _get_model().start_chat(history=state.history)
     
     
 
     # 1) call model (guarded)
     try:
-        initial = chat.send_message(user_text or "")
+        initial = _retry_api_call(chat.send_message, user_text or "")
     except Exception as e:
-        msg = (
-            f"Model error: {e}\n"
-            "Try setting GEMINI_MODEL to a supported name (e.g., "
-            "gemini-2.0-flash, gemini-1.5-flash-8b, or gemini-1.5-pro)."
-        )
-        return {"reply": msg, "message": msg, "assistant": msg, "text": msg}
+        msg = str(e)
+        # Log 429 errors specifically for debugging
+        if "429" in msg or "Resource exhausted" in msg or "rate limit" in msg.lower():
+            print(f"[step] 429 Rate limit detected after retries: {msg[:200]}")
+        return {
+            "reply": f"Model error: {e}\n"
+                     "Try setting GEMINI_MODEL to a supported name (e.g., "
+                     "gemini-2.0-flash, gemini-1.5-flash-8b, or gemini-1.5-pro).",
+            "message": str(e),
+            "assistant": "[Error - please retry]",
+            "text": str(e),
+            "error": str(e)
+        }
 
     # 2) tool call handling (submit tool outputs back to the model)
     reply_text = None
@@ -402,13 +486,14 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             tool_payload = _run_rules(args)
             call_id = getattr(fc, "id", None)
             try:
-                # Preferred path (new SDKs)
-                followup = chat.submit_tool_outputs(tool_outputs=[{
-                    "call_id": call_id,
-                    "output": json.dumps(tool_payload)
-                }])
+                # Preferred path (new SDKs) with retry for transient rate limits
+                followup = _retry_api_call(
+                    chat.submit_tool_outputs,
+                    tool_outputs=[{"call_id": call_id, "output": json.dumps(tool_payload)}],
+                )
                 reply_text = _resp_text(followup)
-            except Exception:
+            except Exception as e:
+                print(f"[step] submit_tool_outputs failed (after retries): {str(e)[:200]}")
                 # Robust fallback: reply directly from tool payload (no schema gymnastics)
                 reply_text = _format_tool_reply(tool_payload)
             break
@@ -422,7 +507,12 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
         reply_text = "I’m here. Share diameter, color changes, evolution (weeks), age, and body site."
 
     # 4) keep compact history (Gemini expects parts with 'text' objects)
-    state.history.append({"role": "user", "parts": [{"text": user_text or ""}]})
+    # Store user input in history (extract original message without context_summary)
+    user_msg_for_history = user_text
+    if context_summary and user_msg_for_history and context_summary in user_msg_for_history:
+        user_msg_for_history = user_msg_for_history.replace(context_summary, "").strip()
+    
+    state.history.append({"role": "user", "parts": [{"text": user_msg_for_history or ""}]})
     state.history.append({"role": "model", "parts": [{"text": reply_text}]})
 
     # 5) return multiple synonymous fields for frontend compatibility

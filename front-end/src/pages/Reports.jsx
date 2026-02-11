@@ -198,7 +198,6 @@ export default function Reports() {
 
   const isLoggedIn = Boolean(userEmail);
   const storageKey = userEmail ? `skinai_reports_${userEmail}` : null;
-
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");

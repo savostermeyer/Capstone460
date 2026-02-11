@@ -1,7 +1,7 @@
 # Running the Project (Development)
 
-This project requires **two terminals**:  
-one for the backend and one for the frontend.
+This project requires **three terminals**:  
+one for the backend, one for the frontend, and one to run the server.
 
 ---
 
@@ -9,18 +9,17 @@ one for the backend and one for the frontend.
 
 From the project root:
 
-```bash
-source venv/Scripts/activate
+## From the project root:
 cd back-end/src
 python -m expertSystem.app
 
-
-##TWo Terminals 
-## Frontend 
-
+## Frontend, From the project root:
+## Open 2nd Terminal 
+ 
 cd front-end
-npm install
+npm i
 npm run dev
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
 
@@ -28,3 +27,12 @@ npm run dev
 
 node server.js
 >>>>>>> b324c9bb0744c0572604ff37a5810d9d0a1bb4dc
+=======
+
+## Server, From the project root:
+## Open Third Terminal
+
+npm i
+node server.js
+
+>>>>>>> c6a6786d12716f2d461f30844f98efbcfae4f9bb

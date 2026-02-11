@@ -39,4 +39,10 @@ Thumbs.db
 # Temp / legacy
 # ----------------------
 front-end-temp/
+<<<<<<< HEAD
 *.keras
+=======
+
+
+resnet50_skin_disease_finetuned.keras
+>>>>>>> c6a6786d12716f2d461f30844f98efbcfae4f9bb
