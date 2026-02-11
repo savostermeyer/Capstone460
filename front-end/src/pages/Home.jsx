@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import heroImage from "../assets/hero.jpg";
 
 export default function Home() {
   return (
@@ -6,13 +7,12 @@ export default function Home() {
       <section className="hero" role="region" aria-labelledby="hero-title">
         <div className="hero-overlay" />
         <img
-          src="/assets/hero.jpg"
-          alt=""
+          src={heroImage}
+          alt="Skin disease classification hero image"
           className="hero-bg"
-          aria-hidden="true"
         />
         <div className="container hero-inner">
-          <span className="badge">Senior Capstone Project 2025</span>
+          <span className="badge">Senior Capstone Project 2025-2026</span>
           <h1 id="hero-title" className="hero-title">
             AI-Driven Skin Disease Classification System
           </h1>
