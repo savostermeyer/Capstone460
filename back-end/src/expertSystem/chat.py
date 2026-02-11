@@ -150,11 +150,18 @@ FUNCTIONS = [{
 SYSTEM_INSTRUCTION = (
   "You are a dermatologist intake assistant in a research prototype. "
   "Gather focused clinical information and provide risk-oriented guidance—NOT a diagnosis. "
-  "Always say you are not a doctor and this is not medical advice.\n\n"
+  "This tool does not provide medical diagnosis or treatment. I am an AI, not a doctor. "
+  "Always recommend consulting a licensed clinician for medical decisions.\n\n"
+
+  "CONVERSATION RULES:\n"
+  "• NEVER repeat questions the user has already answered in this conversation.\n"
+  "• Track what information you already have (body site, size, changes, colors, symptoms, age, skin type).\n"
+  "• Build naturally on previous answers; reference what they told you.\n"
+  "• Do NOT say 'I am an AI' or 'I cannot provide medical advice' more than once per conversation.\n\n"
 
   "QUESTION STYLE (patient-friendly):\n"
   "• Avoid numbers/scales unless the user already gave them. Use plain language + examples.\n"
-  "• Ask 1–2 questions per turn. Offer simple choices and 'Not sure'.\n"
+  "• Ask 1 question per turn. Offer simple choices and 'Not sure'.\n"
   "• Examples:\n"
   "  - Asymmetry → 'Do both halves look the same if you imagine folding it?' (Yes / No / Not sure)\n"
   "  - Border → 'Edges smooth like a circle/oval, or uneven/jagged?' (Smooth / Uneven / Not sure)\n"
@@ -170,16 +177,15 @@ SYSTEM_INSTRUCTION = (
   "• pain_0_10: none→0, mild→2, moderate→5, severe→8 (approximate verbal scales)\n"
   "• itching_0_10: none→0, mild→2, moderate→5, severe→8\n"
   "• evolution_speed: No/Stable→'stable', A little→'slow', A lot→'rapid'\n"
-  "• If unsure, leave the field null and ask at most one key follow-up next turn.\n\n"
+  "• If unsure, leave the field null and ask only ONE key follow-up next turn.\n\n"
 
   "TOOL USE:\n"
   "• When you have body_site + diameter_mm + change status + at least some ABCDE/symptoms, call expert_derm_consult. "
-  "Otherwise ask the single most important missing question.\n\n"
+  "Otherwise ask the single most important MISSING question.\n\n"
 
   "STYLE:\n"
-  "• Be concise and supportive; use brief bullets for findings/next steps. "
+  "• Be concise and natural; avoid repetition. Use brief bullets for findings/next steps. "
   "• If high-risk features (rapid change, bleeding, ulceration, diameter ≥ 6 mm, clearly uneven edges/colors), "
-  "If given diagnose or prescribe treatment, give a warning that you are an AI and not a replacement for a medical professional. "
   "recommend prompt in-person evaluation.\n"
 )
 
@@ -295,13 +301,14 @@ def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
     if payload.get("diameter_mm") is None:
         needed.append("What is the largest diameter in millimeters?")
     if payload.get("evolution_speed") is None:
-        needed.append("Has it been changing? stable, slow, moderate, or rapid?")
-    if payload.get("bleeding") is None:
+        needed.append("Has it been changing? (stable, slow, moderate, or rapid)")
+    if payload.get("bleeding") is None and not needed:  # Only ask if we don't have critical info
         needed.append("Has it bled or crusted?")
-    if payload.get("number_of_colors") is None:
-        needed.append("Roughly how many colors do you see (1,2,≥3)?")
-    out["next_questions"] = needed[:3]
-
+    if payload.get("number_of_colors") is None and not needed:  # Only ask if we don't have critical info
+        needed.append("Roughly how many colors do you see (1, 2, or 3+)?")
+    
+    out["next_questions"] = needed[:1]  # Ask only 1 question at a time (was 3)
+    
     return out
 
 def _format_tool_reply(payload: Dict[str, Any]) -> str:
@@ -383,12 +390,37 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
         else:
             user_text = summary_text
     
-    # start the model char
+    # Build a summary of what we already know from conversation history
+    # This helps the model avoid repeating questions
+    context_summary = ""
+    if len(state.history) > 0:
+        # Extract key data points from conversation
+        known_info = []
+        conversation_text = " ".join([msg.get("parts", [{}])[0].get("text", "") for msg in state.history])
+        
+        # Check for previously mentioned information
+        if any(word in conversation_text.lower() for word in ["forearm", "arm", "leg", "ankle", "shin", "calf", "back", "chest", "face", "palm"]):
+            known_info.append("(We know the body location)")
+        if any(word in conversation_text.lower() for word in ["mm", "millimeter", "millimeters", "pencil", "eraser"]):
+            known_info.append("(We know the diameter)")
+        if any(word in conversation_text.lower() for word in ["changing", "changed", "growing", "stable"]):
+            known_info.append("(We know about changes)")
+        if any(word in conversation_text.lower() for word in ["color", "colors", "brown", "red", "black"]):
+            known_info.append("(We know about colors)")
+            
+        if known_info:
+            context_summary = f"\n\n[Context: {' '.join(known_info)}]"
+    
+    # start the model chat
     # BEFORE: Trim old history to prevent unbounded token growth (issue at diagnostic stage)
     initial_history_size = len(state.history)
     state.trim_history(max_turns=10)  # Keep ~20 messages (10 turns)
     trimmed_history_size = len(state.history)
     print(f"[step] History trimmed: {initial_history_size} → {trimmed_history_size} messages")
+    
+    # Append context summary to current message to help model track state
+    if context_summary and user_text:
+        user_text = user_text + context_summary
     
     chat = _get_model().start_chat(history=state.history)
     
@@ -445,7 +477,12 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
         reply_text = "I’m here. Share diameter, color changes, evolution (weeks), age, and body site."
 
     # 4) keep compact history (Gemini expects parts with 'text' objects)
-    state.history.append({"role": "user", "parts": [{"text": user_text or ""}]})
+    # Store user input in history (extract original message without context_summary)
+    user_msg_for_history = user_text
+    if context_summary and user_msg_for_history and context_summary in user_msg_for_history:
+        user_msg_for_history = user_msg_for_history.replace(context_summary, "").strip()
+    
+    state.history.append({"role": "user", "parts": [{"text": user_msg_for_history or ""}]})
     state.history.append({"role": "model", "parts": [{"text": reply_text}]})
 
     # 5) return multiple synonymous fields for frontend compatibility
