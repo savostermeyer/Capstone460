@@ -126,12 +126,15 @@ app.get("/api/images/:id", async (req, res) => {
   }
 });
 
+<<<<<<< HEAD
 // Email validation helper
 function isValidEmail(email) {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 }
 
+=======
+>>>>>>> b324c9bb0744c0572604ff37a5810d9d0a1bb4dc
 // Authentication routes
 // Register endpoint
 app.post("/api/auth/register", async (req, res) => {
@@ -142,12 +145,15 @@ app.post("/api/auth/register", async (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
+<<<<<<< HEAD
     if (!isValidEmail(email)) {
       return res
         .status(400)
         .json({ error: "Please provide a valid email address" });
     }
 
+=======
+>>>>>>> b324c9bb0744c0572604ff37a5810d9d0a1bb4dc
     if (password.length < 6) {
       return res
         .status(400)
@@ -197,12 +203,15 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
+<<<<<<< HEAD
     if (!isValidEmail(email)) {
       return res
         .status(400)
         .json({ error: "Please provide a valid email address" });
     }
 
+=======
+>>>>>>> b324c9bb0744c0572604ff37a5810d9d0a1bb4dc
     const authDB = getAuthDB();
     const usersCollection = authDB.collection("users");
 

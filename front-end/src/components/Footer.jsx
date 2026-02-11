@@ -3,7 +3,8 @@ export default function Footer() {
     <footer className="site-footer" role="contentinfo">
       <div className="container">
         <p className="footnote">
-          Senior Capstone project 2025-2026 · SkinAI Classifier
+          © {new Date().getFullYear()} SkinAI Classifier · Senior Capstone Project
+          · For demonstration only.
         </p>
       </div>
     </footer>
