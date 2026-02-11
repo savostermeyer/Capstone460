@@ -1,12 +1,47 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "../styles/upload.css";
+
+/**
+ * Shared report schema (stored in localStorage, WITHOUT previewUrl):
+ * {
+ *   id: string,
+ *   createdAt: ISO string,
+ *   title: string,
+ *   images: [{ imageId?: string, filename: string }],
+ *   topPredictions: [{ code?: string, label: string, confidence: number }],
+ *   patientInfo?: object
+ * }
+ *
+ * Preview URLs are stored in sessionStorage only:
+ * sessionStorage["skinai_report_previews_<reportId>"] = JSON.stringify([{ filename, previewUrl }])
+ */
+
+function makeId() {
+  // crypto.randomUUID() is great but not universal in older environments
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // fallback: reasonably unique
+  return `r_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function fileSig(f) {
+  // stable signature for matching previews to files (handles reordering better than idx)
+  return `${f.name}__${f.size}__${f.lastModified}`;
+}
 
 export default function Upload() {
   const MAX_IMAGES = 20;
   const fileInputRef = useRef(null);
+  const navigate = useNavigate();
+
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+  // If API_BASE is "", fetch will hit same-origin (good when you have a dev proxy)
 
   const [files, setFiles] = useState([]); // File[]
-  const [previews, setPreviews] = useState([]); // { name, url }[]
+  const [previews, setPreviews] = useState([]); // { sig, name, url }[]
+
   const [form, setForm] = useState({
     name: "",
     age: "",
@@ -27,11 +62,25 @@ export default function Upload() {
   });
 
   const [formMsg, setFormMsg] = useState("");
-  const [result, setResult] = useState(null); // demo result object
+  const [result, setResult] = useState(null); // { success: bool, topPredictions?: [], message: string }
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Get logged-in user email
+  const userEmail = useMemo(() => {
+    try {
+      return localStorage.getItem("skinai_user");
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Build object URLs for previews (and clean them up)
   useEffect(() => {
-    const next = files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
+    const next = files.map((f) => ({
+      sig: fileSig(f),
+      name: f.name,
+      url: URL.createObjectURL(f),
+    }));
     setPreviews(next);
 
     return () => {
@@ -70,8 +119,7 @@ export default function Upload() {
     setResult(null);
 
     setFiles((prev) => {
-      // De-dupe by a stable signature (name/size/lastModified).
-      const sig = (f) => `${f.name}__${f.size}__${f.lastModified}`;
+      const sig = (f) => fileSig(f);
       const seen = new Set(prev.map(sig));
       const merged = [...prev];
 
@@ -163,90 +211,148 @@ export default function Upload() {
       return;
     }
 
-    setFormMsg("Uploading...");
+    if (!userEmail) {
+      setFormMsg("You must be logged in to upload.");
+      return;
+    }
 
-    // NOTE (backend contract):
-    // We append multiple files under the key "images" to send them in ONE request.
-    // If your backend expects a single file field (often named "image"), either:
-    //   1) update the backend to accept "images" as an array (multer: upload.array("images")), OR
-    //   2) change this line to: formData.append("image", file) and upload one-by-one.
-    // If you see errors like "Unexpected field" or "No file uploaded", this key name is the first thing to check.
+    setIsSubmitting(true);
+    setFormMsg("Uploading and analyzing...");
 
     try {
-      // ONE request for all images (better UX than 20 requests)
+      // Send all images and patient info in ONE request to backend.
+      // Backend contract: expects "images" (multipart array) and "patientInfo" (JSON string).
       const formData = new FormData();
       files.forEach((file) => formData.append("images", file));
 
-      formData.append(
-        "patientInfo",
-        JSON.stringify({
-          name: form.name,
-          age: form.age,
-          sex: form.sex,
-          skinType: form.skinType,
+      const patientInfo = {
+        name: form.name,
+        age: form.age,
+        sex: form.sex,
+        skinType: form.skinType,
+        lesionLocation: form.lesionLocation,
+        lesionLocationOther: form.lesionLocationOther,
+        durationDays: form.duration,
+        primarySymptoms: form.primarySymptoms,
+        primarySymptomsOther: form.primarySymptomsOther,
+        medicalBackground: form.medicalBackground,
+        medicalBackgroundDetails: form.medicalBackgroundDetails,
+        familyHistory: form.familyHistory,
+        sunExposure: form.sunExposure,
+        spfUse: form.spfUse,
+        medications: form.medications,
+        uploadDate: new Date().toISOString(),
+      };
 
-          lesionLocation: form.lesionLocation,
-          lesionLocationOther: form.lesionLocationOther,
+      formData.append("patientInfo", JSON.stringify(patientInfo));
 
-          durationDays: form.duration,
-
-          primarySymptoms: form.primarySymptoms,
-          primarySymptomsOther: form.primarySymptomsOther,
-
-          medicalBackground: form.medicalBackground,
-          medicalBackgroundDetails: form.medicalBackgroundDetails,
-
-          familyHistory: form.familyHistory,
-          sunExposure: form.sunExposure,
-          spfUse: form.spfUse,
-
-          medications: form.medications,
-
-          uploadDate: new Date().toISOString(),
-        })
-      );
-
-      const response = await fetch("/api/upload", {
+      const response = await fetch(`${API_BASE}/api/upload`, {
         method: "POST",
         body: formData,
-
-        // If your login uses cookies/sessions (common with MongoDB + Express), this is required
-        // so the browser sends the session cookie with the upload request. If you use JWT in headers,
-        // you may remove this and instead send an Authorization header.
-
-        // If your login uses cookies/sessions, this prevents 401/403
         credentials: "include",
       });
 
-      // If backend returns non-JSON on errors, this avoids crash
       let data = null;
       const contentType = response.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) data = await response.json();
+      if (contentType.includes("application/json")) {
+        data = await response.json();
+      }
 
       if (!response.ok) {
         const msg = data?.error || `Upload failed (${response.status})`;
         throw new Error(msg);
       }
 
-      // Demo analysis result
-      const now = new Date();
-      const meta = `${files.length} image(s) uploaded • ${now.toLocaleString()}`;
+      // Backend response (suggested):
+      // { reportId, topPredictions, images?: [{imageId, filename}] }
+      const reportId = data?.reportId || makeId();
+      const topPredictions = Array.isArray(data?.topPredictions) ? data.topPredictions : [];
 
-      const tags = [
-        `Age: ${form.age}`,
-        `Skin type: ${form.skinType}`,
-        `Location: ${
-          form.lesionLocation === "Other" ? form.lesionLocationOther : form.lesionLocation
-        }`,
-        `Duration: ${form.duration} day(s)`,
-      ];
+      // Store preview URLs in sessionStorage (NOT localStorage)
+      // to support immediate "Upload -> Reports" view without storing object URLs long-term.
+      try {
+        const previewPairs = files.map((f) => {
+          const sig = fileSig(f);
+          const p = previews.find((x) => x.sig === sig);
+          return {
+            filename: f.name,
+            previewUrl: p?.url || "",
+          };
+        });
+        sessionStorage.setItem(
+          `skinai_report_previews_${reportId}`,
+          JSON.stringify(previewPairs)
+        );
+      } catch {
+        // safe to ignore
+      }
 
-      setResult({ meta, tags });
-      setFormMsg(`✓ Successfully uploaded ${files.length} image(s) to database`);
+      // Build image array: prefer backend-provided imageIds; fallback is filename-only.
+      const images =
+        Array.isArray(data?.images) && data.images.length > 0
+          ? data.images.map((img) => ({
+              imageId: img.imageId,
+              filename: img.filename || img.imageId || "image",
+            }))
+          : files.map((f) => ({
+              filename: f.name,
+            }));
+
+      const report = {
+        id: reportId,
+        createdAt: new Date().toISOString(),
+        title: `Lesion Analysis — ${form.lesionLocation || "Unknown location"}`,
+        images,
+        topPredictions,
+        patientInfo: {
+          name: form.name,
+          age: form.age,
+          sex: form.sex,
+          skinType: form.skinType,
+          lesionLocation: form.lesionLocation,
+          lesionLocationOther: form.lesionLocationOther,
+          durationDays: form.duration,
+        },
+      };
+
+      // Save report to localStorage (NO previewUrl here)
+      const storageKey = `skinai_reports_${userEmail}`;
+      try {
+        const existing = localStorage.getItem(storageKey);
+        const reports = existing ? JSON.parse(existing) : [];
+        reports.unshift(report);
+        localStorage.setItem(storageKey, JSON.stringify(reports));
+      } catch (err) {
+        console.error("Failed to save report to localStorage:", err);
+      }
+
+      // Show success result
+      if (topPredictions.length > 0) {
+        setResult({
+          success: true,
+          topPredictions,
+          message: `✓ Analysis complete. Showing top 3 predictions for ${files.length} image(s).`,
+        });
+      } else {
+        setResult({
+          success: true,
+          topPredictions: [],
+          message: `✓ Uploaded ${files.length} image(s). Backend analysis may still be processing.`,
+        });
+      }
+
+      setFormMsg("");
+
+      // Navigate to Reports page after short delay so user sees success status
+      setTimeout(() => {
+        navigate("/reports");
+      }, 900);
     } catch (error) {
       console.error("Upload error:", error);
       setFormMsg(`Error: ${error.message}`);
       setResult(null);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -288,7 +394,11 @@ export default function Upload() {
             or click to browse
           </p>
 
-          <label className="file-btn" style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+          <label
+            className="file-btn"
+            style={{ marginTop: 10 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             Choose File
             <input
               ref={fileInputRef}
@@ -383,7 +493,6 @@ export default function Upload() {
                 <option>Female</option>
                 <option>Male</option>
               </select>
-              <p className="q-hint">Used only to provide context for the demo analysis.</p>
             </div>
 
             <div className="q-card">
@@ -404,7 +513,6 @@ export default function Upload() {
                 <option value="V">V — Brown</option>
                 <option value="VI">VI — Dark brown</option>
               </select>
-              <p className="q-hint">This is the Fitzpatrick skin type scale (I–VI).</p>
             </div>
 
             <div className="q-card">
@@ -438,8 +546,6 @@ export default function Upload() {
                   required
                 />
               )}
-
-              <p className="q-hint">Pick the closest area where the lesion is located.</p>
             </div>
 
             <div className="q-card">
@@ -455,7 +561,6 @@ export default function Upload() {
                 onChange={(e) => updateField("duration", e.target.value)}
                 required
               />
-              <p className="q-hint">How long you’ve noticed the lesion (estimate is fine).</p>
             </div>
 
             {/* Primary symptoms checkboxes */}
@@ -487,8 +592,6 @@ export default function Upload() {
                 ))}
               </div>
 
-              <p className="q-hint">Select all that apply.</p>
-
               {form.primarySymptoms.includes("Other") && (
                 <input
                   className="q-input"
@@ -512,7 +615,6 @@ export default function Upload() {
                 <option value="yes">Yes</option>
                 <option value="unsure">Not sure</option>
               </select>
-              <p className="q-hint">Examples: prior biopsies, chronic skin conditions, immune issues.</p>
 
               {form.medicalBackground === "yes" && (
                 <textarea
@@ -538,7 +640,6 @@ export default function Upload() {
                 <option value="melanoma">Melanoma</option>
                 <option value="unsure">Not sure</option>
               </select>
-              <p className="q-hint">Only include immediate family if known.</p>
             </div>
 
             <div className="q-card">
@@ -553,7 +654,6 @@ export default function Upload() {
                 <option value="moderate">Moderate</option>
                 <option value="high">High</option>
               </select>
-              <p className="q-hint">Think of your typical daily/weekly time in direct sun.</p>
             </div>
 
             <div className="q-card">
@@ -569,7 +669,6 @@ export default function Upload() {
                 <option value="often">Often</option>
                 <option value="daily">Daily</option>
               </select>
-              <p className="q-hint">How often you use sunscreen when outdoors.</p>
             </div>
 
             <div className="q-card" style={{ gridColumn: "1 / -1" }}>
@@ -580,7 +679,6 @@ export default function Upload() {
                 value={form.medications}
                 onChange={(e) => updateField("medications", e.target.value)}
               />
-              <p className="q-hint">Optional. You can separate items with commas.</p>
             </div>
 
             <div className="q-card" style={{ gridColumn: "1 / -1" }}>
@@ -598,11 +696,16 @@ export default function Upload() {
           </div>
 
           <div className="form-actions">
-            <button className="btn btn-cta" type="submit" disabled={!canAnalyze}>
-              Analyze
+            <button className="btn btn-cta" type="submit" disabled={!canAnalyze || isSubmitting}>
+              {isSubmitting ? "Uploading..." : "Analyze"}
             </button>
 
-            <button type="button" className="btn btn-secondary" onClick={clearAll}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={clearAll}
+              disabled={isSubmitting}
+            >
               Clear
             </button>
 
@@ -614,17 +717,28 @@ export default function Upload() {
 
         {/* RESULTS */}
         <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
-          <h3>Preliminary Analysis (demo)</h3>
+          <h3>Analysis Results</h3>
           <p id="resultMeta" className="muted">
-            {result?.meta || ""}
+            {result?.message || ""}
           </p>
-          <div id="resultTags" style={{ marginTop: 6 }}>
-            {result?.tags?.map((t) => (
-              <span key={t} className="pill">
-                {t}
-              </span>
-            ))}
-          </div>
+
+          {result?.success && result?.topPredictions?.length > 0 ? (
+            <div id="resultPredictions" style={{ marginTop: 12 }}>
+              <strong>Top 3 Predictions:</strong>
+              <ul style={{ margin: "8px 0 0 20px" }}>
+                {result.topPredictions.slice(0, 3).map((p, i) => (
+                  <li key={i}>
+                    <strong>{p.label || p.code}</strong> —{" "}
+                    {typeof p.confidence === "number" ? `${(p.confidence * 100).toFixed(1)}%` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : result?.success ? (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Backend processing your images. Check Reports to see results once analysis is complete.
+            </p>
+          ) : null}
         </div>
       </section>
     </main>
