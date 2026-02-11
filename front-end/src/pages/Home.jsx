@@ -1,8 +1,4 @@
 import { Link } from "react-router-dom";
-<<<<<<< HEAD
-import heroImage from "../assets/hero.jpg";
-=======
->>>>>>> b324c9bb0744c0572604ff37a5810d9d0a1bb4dc
 
 export default function Home() {
   return (
