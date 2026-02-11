@@ -29,6 +29,7 @@ from typing import Dict
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 from expertSystem.chat import ConvState, step as chat_step
+from skinai_analyzer import analyze_skin_lesion
 
 
 # --- Project roots & import path setup ---
@@ -103,6 +104,59 @@ def do_query():
         r["abs_url"] = f"{base}{rel}"
 
     return jsonify(out)
+
+
+@app.post("/analyze_skin")
+def analyze_skin():
+    # multipart/form-data required
+    if "image" not in request.files:
+        return jsonify(error="image file required (field name: 'image')"), 400
+    f = request.files["image"]
+    if not f.filename:
+        return jsonify(error="empty filename"), 400
+
+    # Intake fields: strings "true"/"false" (case-insensitive)
+    intake_fields = ["rapid_change", "bleeding", "itching", "pain"]
+    intake: dict = {}
+    for field in intake_fields:
+        raw = request.form.get(field)
+        if raw is None:
+            # missing -> treat as False
+            intake[field] = False
+            continue
+        val = raw.strip().lower()
+        if val not in ("true", "false"):
+            return (
+                jsonify(error=f"invalid value for {field}: expected 'true' or 'false'"),
+                400,
+            )
+        intake[field] = val == "true"
+
+    # For now, use a stubbed top-k model output. TODO: replace with real ML model call.
+    topk = [
+        {"label": "mel", "prob": 0.62},
+        {"label": "nv", "prob": 0.27},
+        {"label": "bkl", "prob": 0.11},
+    ]
+
+    # Note: we don't use the uploaded image for now; the real model will consume it.
+    result = analyze_skin_lesion(topk, intake)
+
+    facts = result.get("facts", {})
+    resp = {
+        "primary_result": result.get("primary_result"),
+        "key_indicators": {
+            "high_risk_flag": facts.get("high_risk_flag"),
+            "moderate_risk_flag": facts.get("moderate_risk_flag"),
+            "low_risk_flag": facts.get("low_risk_flag"),
+            "needs_clinician_review": facts.get("needs_clinician_review"),
+        },
+        "facts": facts,
+        "trace": result.get("trace", []),
+        "model_topk": topk,
+    }
+
+    return jsonify(resp)
 
 
 # Serve other front-end files (about.html, upload.html, team.html, etc.)
