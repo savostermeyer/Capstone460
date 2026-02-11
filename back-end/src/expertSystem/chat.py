@@ -37,6 +37,7 @@ print("[dotenv] file:", find_dotenv(usecwd=True))
 print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
 
 import google.generativeai as genai
+import time
 from collections.abc import Mapping
 
 
@@ -346,6 +347,34 @@ def _resp_text(resp) -> str:
         pass
     return (getattr(resp, "text", None) or "").strip()
 
+
+# ---- API call retry helper ----
+def _retry_api_call(fn, *args, max_retries: int = 4, base_delay: float = 1.0):
+    """
+    Call `fn(*args)` with an exponential backoff retry for transient rate-limit/resource errors.
+    Retries when the exception message contains indicators of rate limiting (429 / Resource exhausted).
+    On final failure the exception is propagated.
+    """
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return fn(*args)
+        except Exception as e:
+            last_err = e
+            msg = str(e) or ""
+            is_rate = ("429" in msg) or ("resource exhausted" in msg.lower()) or ("rate limit" in msg.lower())
+            if not is_rate:
+                # Non-rate errors should not be retried
+                raise
+            if attempt == max_retries:
+                # give up and re-raise the last exception
+                raise
+            delay = base_delay * (2 ** (attempt - 1))
+            print(f"[retry] attempt {attempt} failed: {msg[:180]} -- sleeping {delay}s")
+            time.sleep(delay)
+    # if somehow we exit loop
+    raise last_err
+
 # ---- Main step ----
 def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dict[str,Any]]=None) -> Dict[str, Any]:
     
@@ -428,12 +457,12 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
 
     # 1) call model (guarded)
     try:
-        initial = chat.send_message(user_text or "")
+        initial = _retry_api_call(chat.send_message, user_text or "")
     except Exception as e:
         msg = str(e)
         # Log 429 errors specifically for debugging
-        if "429" in msg or "Resource exhausted" in msg:
-            print(f"[step] 429 Rate limit detected: {msg[:100]}")
+        if "429" in msg or "Resource exhausted" in msg or "rate limit" in msg.lower():
+            print(f"[step] 429 Rate limit detected after retries: {msg[:200]}")
         return {
             "reply": f"Model error: {e}\n"
                      "Try setting GEMINI_MODEL to a supported name (e.g., "
@@ -457,13 +486,14 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             tool_payload = _run_rules(args)
             call_id = getattr(fc, "id", None)
             try:
-                # Preferred path (new SDKs)
-                followup = chat.submit_tool_outputs(tool_outputs=[{
-                    "call_id": call_id,
-                    "output": json.dumps(tool_payload)
-                }])
+                # Preferred path (new SDKs) with retry for transient rate limits
+                followup = _retry_api_call(
+                    chat.submit_tool_outputs,
+                    tool_outputs=[{"call_id": call_id, "output": json.dumps(tool_payload)}],
+                )
                 reply_text = _resp_text(followup)
-            except Exception:
+            except Exception as e:
+                print(f"[step] submit_tool_outputs failed (after retries): {str(e)[:200]}")
                 # Robust fallback: reply directly from tool payload (no schema gymnastics)
                 reply_text = _format_tool_reply(tool_payload)
             break

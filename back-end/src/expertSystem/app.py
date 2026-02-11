@@ -49,11 +49,22 @@ from typing import Dict
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image, ImageOps
 from expertSystem.chat import ConvState, step as chat_step
+import time
+from collections import deque
 
 # ---------- Chatbot wiring ----------
 
 # hold per-session state in memory for dev; switch to a store later
 _SESS: Dict[str, ConvState] = {}
+_LAST_REQUEST: Dict[str, float] = {}
+# Keep recent request timestamps per session for sliding-window rate limiting
+_REQ_TIMES: Dict[str, deque] = {}
+
+# Rate limit settings (configurable via env)
+# Minimum seconds between consecutive requests from same session (debounce)
+CHAT_MIN_INTERVAL = float(os.getenv("CHAT_MIN_INTERVAL", "1.0"))
+# Maximum allowed requests per minute per session
+CHAT_MAX_PER_MINUTE = int(os.getenv("CHAT_MAX_PER_MINUTE", "20"))
 # --- Project roots & import path setup ---
 ROOT = BACK_END
 SRC_DIR = os.path.join(ROOT, "src")
@@ -338,6 +349,54 @@ def chat():
     try:
         sid = request.args.get("sid", "demo")  # TODO: real session id later
         st = _SESS.get(sid) or ConvState()
+
+        # --- simple per-session debounce/rate-limit ---
+        now = time.time()
+        last = _LAST_REQUEST.get(sid)
+        if last is not None and (now - last) < CHAT_MIN_INTERVAL:
+            wait = CHAT_MIN_INTERVAL - (now - last)
+            msg = (
+                f"You're sending messages too quickly. Please wait {wait:.1f}s and try again."
+            )
+            print(f"[CHAT][rate] Debounce: sid={sid} wait={wait:.2f}s")
+            return (
+                jsonify({
+                    "reply": msg,
+                    "message": "Rate limit: debounce",
+                    "assistant": "[Slow down]",
+                    "text": msg,
+                    "error_code": "RATE_LIMIT_DEBOUNCE",
+                }),
+                200,
+            )
+
+        # sliding window per-minute counter
+        dq = _REQ_TIMES.get(sid)
+        if dq is None:
+            dq = deque()
+            _REQ_TIMES[sid] = dq
+        # purge older than 60s
+        cutoff = now - 60
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= CHAT_MAX_PER_MINUTE:
+            msg = (
+                "Too many requests from this session in the last minute. Please wait a bit."
+            )
+            print(f"[CHAT][rate] Sliding-window limit exceeded: sid={sid} count={len(dq)}")
+            return (
+                jsonify({
+                    "reply": msg,
+                    "message": "Rate limit: burst",
+                    "assistant": "[Try later]",
+                    "text": msg,
+                    "error_code": "RATE_LIMIT_BURST",
+                }),
+                200,
+            )
+        # record this request
+        dq.append(now)
+        _LAST_REQUEST[sid] = now
 
         # read text and image from upload form
         user_text = request.form.get("text")
