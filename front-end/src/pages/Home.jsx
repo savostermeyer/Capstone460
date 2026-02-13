@@ -1,7 +1,10 @@
 import { Link } from "react-router-dom";
 import heroImage from "../assets/hero.jpg";
+import { isAuthenticated } from "../auth";
 
 export default function Home() {
+  const uploadPath = isAuthenticated() ? "/upload" : "/login?next=%2Fupload";
+
   return (
     <main>
       <section className="hero" role="region" aria-labelledby="hero-title">
@@ -23,7 +26,7 @@ export default function Home() {
             melanoma, with high accuracy and confidence.
           </p>
 
-          <Link className="btn btn-cta" to="/upload">
+          <Link className="btn btn-cta" to={uploadPath}>
             Upload Image for Analysis
           </Link>
         </div>

@@ -78,7 +78,7 @@ export default function Login() {
         <p className="muted">
           {isSignup
             ? "Sign up to access your saved analysis reports."
-            : "Sign in to access your saved analysis reports."}
+            : "Sign in to upload images for analysis."}
         </p>
 
         <div className="card" role="region" aria-label="Login form">

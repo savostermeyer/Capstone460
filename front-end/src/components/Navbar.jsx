@@ -1,6 +1,17 @@
-import { NavLink, Link } from "react-router-dom";
+import { NavLink, Link, useNavigate } from "react-router-dom";
+import { getCurrentUser } from "../auth";
 
 export default function Navbar() {
+  const navigate = useNavigate();
+  const userEmail = getCurrentUser();
+
+  function signOut() {
+    try {
+      localStorage.removeItem("skinai_user");
+    } catch { }
+    navigate("/login", { replace: true });
+  }
+
   return (
     <header className="site-header" role="banner">
       <div className="container header-inner">
@@ -44,12 +55,18 @@ export default function Navbar() {
             About Us
           </NavLink>
 
-          <NavLink
-            to="/login"
-            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-          >
-            Login
-          </NavLink>
+          {userEmail ? (
+            <button type="button" className="nav-link" onClick={signOut}>
+              Logout
+            </button>
+          ) : (
+            <NavLink
+              to="/login"
+              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+            >
+              Login
+            </NavLink>
+          )}
         </nav>
       </div>
     </header>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { getCurrentUser } from "../auth";
 
 function fmtPct(x) {
   return (x * 100).toFixed(1) + "%";
@@ -20,11 +21,7 @@ export default function Reports() {
   const navigate = useNavigate();
 
   const userEmail = useMemo(() => {
-    try {
-      return localStorage.getItem("skinai_user");
-    } catch {
-      return null;
-    }
+    return getCurrentUser();
   }, []);
 
   // simple auth gate (demo-level, same as old page)
@@ -39,7 +36,7 @@ export default function Reports() {
 
   // load reports from backend if available, else fallback to localStorage
   useEffect(() => {
-    const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+    const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
 
     async function load() {
       if (API_BASE) {

@@ -10,6 +10,7 @@ import Reports from "./pages/Reports.jsx";
 import Login from "./pages/Login.jsx";
 import Team from "./pages/Team.jsx";
 import About from "./pages/About.jsx";
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
 import ChatbotWidget from "./components/ChatbotWidget.jsx";
 
@@ -20,8 +21,22 @@ export default function App() {
       <Navbar />
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/upload" element={<Upload />} />
-        <Route path="/reports" element={<Reports />} />
+        <Route
+          path="/upload"
+          element={
+            <ProtectedRoute>
+              <Upload />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <ProtectedRoute>
+              <Reports />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/login" element={<Login />} />
         <Route path="/team" element={<Team />} />
         <Route path="/about" element={<About />} />
