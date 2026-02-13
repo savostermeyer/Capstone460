@@ -126,6 +126,12 @@ app.get("/api/images/:id", async (req, res) => {
   }
 });
 
+// Email validation helper
+function isValidEmail(email) {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
 // Authentication routes
 // Register endpoint
 app.post("/api/auth/register", async (req, res) => {
@@ -134,6 +140,12 @@ app.post("/api/auth/register", async (req, res) => {
 
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    if (!isValidEmail(email)) {
+      return res
+        .status(400)
+        .json({ error: "Please provide a valid email address" });
     }
 
     if (password.length < 6) {
@@ -183,6 +195,12 @@ app.post("/api/auth/login", async (req, res) => {
 
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    if (!isValidEmail(email)) {
+      return res
+        .status(400)
+        .json({ error: "Please provide a valid email address" });
     }
 
     const authDB = getAuthDB();

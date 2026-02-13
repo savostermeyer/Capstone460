@@ -35,34 +35,35 @@ export default function Reports() {
   }, [userEmail, navigate]);
 
   const storageKey = userEmail ? `skinai_reports_${userEmail}` : null;
-
   const [reports, setReports] = useState([]);
 
-  // load reports + seed demo if empty
+  // load reports from backend if available, else fallback to localStorage
   useEffect(() => {
-    if (!storageKey) return;
+    const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
-    const raw = localStorage.getItem(storageKey);
-    let data = raw ? JSON.parse(raw) : [];
+    async function load() {
+      if (API_BASE) {
+        try {
+          const res = await fetch(`${API_BASE}/reports`);
+          if (res.ok) {
+            const js = await res.json();
+            if (Array.isArray(js) && js.length > 0) {
+              setReports(js);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn("Could not fetch reports from backend", e);
+        }
+      }
 
-    if (data.length === 0) {
-      data = [
-        {
-          id: crypto.randomUUID(),
-          createdAt: new Date().toISOString(),
-          filename: "lesion_2025-10-10_14-32-11.jpg",
-          topPredictions: [
-            { label: "Melanocytic nevus", confidence: 0.78 },
-            { label: "Benign keratosis", confidence: 0.15 },
-            { label: "Melanoma (flag for review)", confidence: 0.07 },
-          ],
-          notes: "Preliminary model output. Not a medical diagnosis.",
-        },
-      ];
-      localStorage.setItem(storageKey, JSON.stringify(data));
+      if (!storageKey) return;
+      const raw = localStorage.getItem(storageKey);
+      let data = raw ? JSON.parse(raw) : [];
+      setReports(data);
     }
 
-    setReports(data);
+    load();
   }, [storageKey]);
 
   function signOut() {
@@ -155,14 +156,27 @@ export default function Reports() {
                 </div>
 
                 <div style={{ marginTop: 10 }}>
-                  <strong>Top predictions</strong>
-                  <ul style={{ margin: "6px 0 0 18px" }}>
-                    {r.topPredictions.map((p) => (
-                      <li key={p.label}>
-                        {p.label} — {fmtPct(p.confidence)}
-                      </li>
-                    ))}
-                  </ul>
+                  <strong>Primary Result</strong>
+                  <div style={{ marginTop: 6 }}>
+                    {r.analysis?.risk_score || r.primary_result || "N/A"}
+                  </div>
+
+                  <strong style={{ display: "block", marginTop: 8 }}>Risk Indicators</strong>
+                  <div style={{ marginTop: 6 }}>
+                    <span className="pill">High: {String(r.analysis?.risk_score === "high_risk" || r.key_indicators?.high_risk_flag)}</span>
+                    <span className="pill">Moderate: {String(r.analysis?.risk_score === "moderate_risk" || r.key_indicators?.moderate_risk_flag)}</span>
+                    <span className="pill">Low: {String(r.analysis?.risk_score === "low_risk" || r.key_indicators?.low_risk_flag)}</span>
+                  </div>
+
+                  <div style={{ marginTop: 8 }}>
+                    <strong>Top predictions</strong>
+                    <ul style={{ margin: "6px 0 0 18px" }}>
+                      {(r.analysis?.top_predictions || r.topPredictions || []).map((p, i) => (
+                        <li key={i}>{p.label} — {fmtPct(p.confidence ?? p.prob ?? 0)}</li>
+                      ))}
+                    </ul>
+                  </div>
+
                   <p className="muted" style={{ marginTop: 8 }}>
                     {r.notes}
                   </p>

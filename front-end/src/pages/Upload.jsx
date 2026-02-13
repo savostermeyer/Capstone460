@@ -1,3 +1,5 @@
+
+//VITE_API_BASE_URL=http://localhost:3000   add to .env
 import { useEffect, useMemo, useRef, useState } from "react";
 import "../styles/upload.css";
 
@@ -15,13 +17,32 @@ export default function Upload() {
     duration: "",
     consent: false,
   });
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
+  // Persistent session id (shared with chatbot widget)
+  const sid = useMemo(() => {
+    try {
+      let existing = localStorage.getItem("skinai_sid");
+      if (!existing) {
+        existing = "sid_" + Math.random().toString(36).substring(2);
+        localStorage.setItem("skinai_sid", existing);
+      }
+      return existing;
+    } catch {
+      return "sid_" + Math.random().toString(36).substring(2);
+    }
+  }, []);
   const [formMsg, setFormMsg] = useState("");
   const [result, setResult] = useState(null); // demo result object
 
+  const [aiMsg, setAiMsg] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
   // Build object URLs for previews (and clean them up)
   useEffect(() => {
-    const next = files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
+    const next = files.map((f) => ({
+      name: f.name,
+      url: URL.createObjectURL(f),
+    }));
     setPreviews(next);
 
     return () => {
@@ -44,7 +65,7 @@ export default function Upload() {
     if (!fileList) return;
 
     const picked = Array.from(fileList).filter((f) =>
-      ["image/jpeg", "image/png"].includes(f.type)
+      ["image/jpeg", "image/png"].includes(f.type),
     );
 
     if (picked.length === 0) {
@@ -93,59 +114,209 @@ export default function Upload() {
     e.preventDefault();
 
     if (!canAnalyze) {
-      setFormMsg("Please complete required fields, consent, and add at least 1 image.");
+      setFormMsg(
+        "Please complete required fields, consent, and add at least 1 image.",
+      );
       return;
     }
 
-    setFormMsg("Uploading...");
+    setFormMsg("Analyzing...");
+    setAiMsg("");
+    setAiLoading(false);
 
     try {
-      // Upload each file to the server
+      // 1️⃣ Analyze images (Flask)
       const uploadPromises = files.map(async (file) => {
         const formData = new FormData();
         formData.append("image", file);
-        formData.append("patientInfo", JSON.stringify({
-          name: form.name,
-          age: form.age,
-          sex: form.sex,
-          skinType: form.skinType,
-          location: form.location,
-          duration: form.duration,
-          uploadDate: new Date().toISOString(),
-        }));
+        // include page so backend/chat won't KeyError
+        formData.append("page", "upload");
 
-        const response = await fetch("/api/upload", {
+        // required by Flask
+        formData.append("rapid_change", "false");
+        formData.append("bleeding", "false");
+        formData.append("itching", "false");
+        formData.append("pain", "false");
+
+        // intake fields
+        formData.append("name", form.name);
+        formData.append("age", String(form.age));
+        formData.append("sex", form.sex);
+        formData.append("skinType", form.skinType);
+        formData.append("location", form.location);
+        formData.append("duration_days", String(form.duration));
+        formData.append("consent", String(form.consent));
+        formData.append("uploadDate", new Date().toISOString());
+
+        const response = await fetch(`${API_BASE}/analyze_skin?sid=${encodeURIComponent(sid)}`, {
           method: "POST",
           body: formData,
         });
 
         if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || `Failed to upload ${file.name}`);
+          let msg = `Failed to analyze ${file.name}`;
+          try {
+            const errJson = await response.json();
+            msg = errJson.error || msg;
+          } catch {}
+          throw new Error(msg);
         }
 
         return await response.json();
       });
 
+      // ⬅️ IMPORTANT: Promise.all happens OUTSIDE the map
       const results = await Promise.all(uploadPromises);
 
-      // Demo analysis result
       const now = new Date();
-      const meta = `${files.length} image(s) uploaded • ${now.toLocaleString()}`;
+      const meta = `${results.length} image(s) analyzed • ${now.toLocaleString()}`;
+      const first = results[0];
+      if (!first) throw new Error("No analysis results returned.");
 
-      const tags = [
-        `Age: ${form.age}`,
-        `Skin type: ${form.skinType}`,
-        `Location: ${form.location}`,
-        `Duration: ${form.duration} day(s)`,
-      ];
+      // If backend returned the seeded assistant explanation, dispatch it into the chat widget
+      try {
+        const seedText = first.assistant_seed || first.explanation_summary?.text || "";
+        if (seedText) {
+          console.debug(
+            "[Upload] Dispatching assistant seed to chatbot widget:",
+            seedText.substring(0, 100)
+          );
+          const dispatched = window.dispatchEvent(
+            new CustomEvent("skinai:assistantMessage", {
+              detail: String(seedText),
+              bubbles: true,
+              composed: true,
+            })
+          );
+          console.debug("[Upload] dispatchEvent returned:", dispatched);
+          window.dispatchEvent(
+            new CustomEvent("skinai:open", { bubbles: true, composed: true })
+          );
+        } else {
+          console.warn("[Upload] No assistant_seed found in response");
+        }
+      } catch (e) {
+        console.warn("Could not dispatch assistant seed", e);
+      }
 
-      setResult({ meta, tags });
-      setFormMsg(`✓ Successfully uploaded ${results.length} image(s) to database`);
+      // Normalize new pipeline response into the shape the UI expects
+      // new response shape: { top_predictions, risk_score, explanation_summary }
+      const normalized = {};
+      normalized.primary_result = first.risk_score ?? null;
+
+      // derive key indicators from risk_score
+      const rs = (first.risk_score || "").toLowerCase();
+      normalized.key_indicators = {
+        high_risk_flag: rs === "high_risk",
+        moderate_risk_flag: rs === "moderate_risk",
+        low_risk_flag: rs === "low_risk",
+        needs_clinician_review: rs === "high_risk",
+      };
+
+      // model_topk expected as [{label, prob}]
+      normalized.model_topk = (first.top_predictions || []).map((p) => ({
+        label: p.label,
+        prob: p.confidence ?? p.prob ?? 0,
+      }));
+
+      // attach explanation/facts for Gemini
+      normalized.facts = first.explanation_summary?.facts || first.explanation_summary || {};
+      normalized.trace = first.explanation_summary?.trace || [];
+
+      setResult({ meta, raw: normalized, raw_full: first });
+      setFormMsg(`✓ Analyzed ${results.length} image(s)`);
+
+      // 2️⃣ Gemini explanation
+      setAiLoading(true);
+
+      const chatData = new FormData();
+      chatData.append(
+        "text",
+        "Explain the result in plain language, summarize key risk indicators, and ask any follow-up questions you need.",
+      );
+
+      chatData.append("image", files[0]);
+      // ensure chat endpoint has page value
+      chatData.append("page", "upload");
+
+      chatData.append("name", form.name);
+      chatData.append("age", String(form.age));
+      chatData.append("sex", form.sex);
+      chatData.append("skinType", form.skinType);
+      chatData.append("location", form.location);
+      chatData.append("duration_days", String(form.duration));
+
+      chatData.append("primary_result", normalized.primary_result ?? "");
+      chatData.append("facts", JSON.stringify(normalized.facts ?? {}));
+      chatData.append("model_topk", JSON.stringify(normalized.model_topk ?? []));
+      chatData.append("trace", JSON.stringify(normalized.trace ?? []));
+
+      // Send the follow-up prompt to the chat endpoint using the same persistent SID
+      const chatRes = await fetch(`${API_BASE}/chat?sid=${encodeURIComponent(sid)}`, {
+        method: "POST",
+        body: chatData,
+      });
+
+      const chatJson = await chatRes.json();
+      const reply =
+        chatJson.reply || chatJson.message || chatJson.assistant || chatJson.text || "";
+      setAiMsg(String(reply));
+
+      // Dispatch assistant reply to chat widget and open it
+      try {
+        console.debug(
+          "[Upload] Dispatching Gemini reply to chatbot widget:",
+          reply.substring(0, 100)
+        );
+        const dispatched = window.dispatchEvent(
+          new CustomEvent("skinai:assistantMessage", {
+            detail: String(reply),
+            bubbles: true,
+            composed: true,
+          })
+        );
+        console.debug("[Upload] dispatchEvent returned:", dispatched);
+        // signal the chat to open
+        window.dispatchEvent(
+          new CustomEvent("skinai:open", { bubbles: true, composed: true })
+        );
+      } catch (e) {
+        console.warn("Could not dispatch assistant event", e);
+      }
+      setAiLoading(false);
+
+      // Save lastAnalysis to localStorage with timestamp & input metadata
+      try {
+        const last = {
+          createdAt: new Date().toISOString(),
+          meta,
+          analysis: first,
+          input: {
+            name: form.name,
+            age: form.age,
+            sex: form.sex,
+            skinType: form.skinType,
+            location: form.location,
+            duration_days: form.duration,
+          },
+        };
+        localStorage.setItem("lastAnalysis", JSON.stringify(last));
+
+        // Send to backend reports/save (best-effort)
+        fetch(`${API_BASE}/reports/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(last),
+        }).catch((err) => console.warn("reports/save failed", err));
+      } catch (e) {
+        console.warn("Could not save lastAnalysis", e);
+      }
     } catch (error) {
-      console.error("Upload error:", error);
+      console.error("Analyze error:", error);
       setFormMsg(`Error: ${error.message}`);
       setResult(null);
+      setAiMsg("");
+      setAiLoading(false);
     }
   }
 
@@ -187,7 +358,11 @@ export default function Upload() {
             or click to browse
           </p>
 
-          <label className="file-btn" style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+          <label
+            className="file-btn"
+            style={{ marginTop: 10 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             Choose File
             <input
               ref={fileInputRef}
@@ -331,11 +506,19 @@ export default function Upload() {
           </div>
 
           <div className="form-actions">
-            <button className="btn btn-cta" type="submit" disabled={!canAnalyze}>
+            <button
+              className="btn btn-cta"
+              type="submit"
+              disabled={!canAnalyze}
+            >
               Analyze
             </button>
 
-            <button type="button" className="btn btn-secondary" onClick={clearAll}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={clearAll}
+            >
               Clear
             </button>
 
@@ -344,21 +527,58 @@ export default function Upload() {
             </span>
           </div>
         </form>
-
         {/* RESULTS */}
         <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
-          <h3>Preliminary Analysis (demo)</h3>
-          <p id="resultMeta" className="muted">
-            {result?.meta || ""}
-          </p>
-          <div id="resultTags" style={{ marginTop: 6 }}>
-            {result?.tags?.map((t) => (
-              <span key={t} className="pill">
-                {t}
-              </span>
-            ))}
-          </div>
+          <h3>Preliminary Analysis</h3>
+
+          <p className="muted">{result?.meta || ""}</p>
+
+          {result?.raw && (
+            <>
+              <div style={{ marginTop: 10 }}>
+                <strong>Primary Result:</strong>{" "}
+                <span className="pill">
+                  {result.raw.primary_result ?? "N/A"}
+                </span>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <strong>Risk Indicators</strong>
+                <div style={{ marginTop: 6 }}>
+                  <span className="pill">
+                    High risk:{" "}
+                    {String(result.raw.key_indicators?.high_risk_flag)}
+                  </span>
+                  <span className="pill">
+                    Moderate risk:{" "}
+                    {String(result.raw.key_indicators?.moderate_risk_flag)}
+                  </span>
+                  <span className="pill">
+                    Low risk: {String(result.raw.key_indicators?.low_risk_flag)}
+                  </span>
+                  <span className="pill">
+                    Needs clinician review:{" "}
+                    {String(result.raw.key_indicators?.needs_clinician_review)}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <strong>Top Predictions</strong>
+                <div style={{ marginTop: 6 }}>
+                  {(result.raw_full?.top_predictions || result.raw?.model_topk || [])
+                    .slice(0, 5)
+                    .map((p, i) => (
+                      <span key={i} className="pill">
+                        {p.label || p["label"]}: {Number(p.confidence ?? p.prob ?? p["confidence"] ?? p["prob"]).toFixed(3)}
+                      </span>
+                    ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
+        {/* AI explanation moved into chatbot window; assistant message is dispatched to widget */}
       </section>
     </main>
   );
