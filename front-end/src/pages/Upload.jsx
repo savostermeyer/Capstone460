@@ -17,7 +17,7 @@ export default function Upload() {
     duration: "",
     consent: false,
   });
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
 
   // Persistent session id (shared with chatbot widget)
   const sid = useMemo(() => {
@@ -158,7 +158,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
           try {
             const errJson = await response.json();
             msg = errJson.error || msg;
-          } catch {}
+          } catch { }
           throw new Error(msg);
         }
 

@@ -39,7 +39,7 @@ export default function Reports() {
 
   // load reports from backend if available, else fallback to localStorage
   useEffect(() => {
-    const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+    const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
 
     async function load() {
       if (API_BASE) {
