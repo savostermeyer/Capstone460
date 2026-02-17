@@ -1,9 +1,25 @@
 
 //VITE_API_BASE_URL=http://localhost:3000   add to .env
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "../styles/upload.css";
 
+const LOGIN_GATE_DELAY_MS = 1000;
+
+function getLoggedInUser() {
+  try {
+    const raw = (localStorage.getItem("skinai_user") || "").trim();
+    if (!raw || raw === "null" || raw === "undefined") {
+      return null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
 export default function Upload() {
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
   const [files, setFiles] = useState([]); // File[]
@@ -34,9 +50,38 @@ export default function Upload() {
   }, []);
   const [formMsg, setFormMsg] = useState("");
   const [result, setResult] = useState(null); // demo result object
+  const [userEmail, setUserEmail] = useState(getLoggedInUser);
+  const [showLoginGate, setShowLoginGate] = useState(false);
 
   const [aiMsg, setAiMsg] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+
+  useEffect(() => {
+    const syncUser = () => setUserEmail(getLoggedInUser());
+
+    syncUser();
+    window.addEventListener("storage", syncUser);
+    window.addEventListener("focus", syncUser);
+
+    return () => {
+      window.removeEventListener("storage", syncUser);
+      window.removeEventListener("focus", syncUser);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (userEmail) {
+      setShowLoginGate(false);
+      return;
+    }
+
+    const timerId = setTimeout(() => {
+      setShowLoginGate(true);
+    }, LOGIN_GATE_DELAY_MS);
+
+    return () => clearTimeout(timerId);
+  }, [userEmail]);
+
   // Build object URLs for previews (and clean them up)
   useEffect(() => {
     const next = files.map((f) => ({
@@ -62,6 +107,12 @@ export default function Upload() {
   }, [form, files]);
 
   function acceptFiles(fileList) {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      setFormMsg("Must be logged in to upload image.");
+      return;
+    }
+
     if (!fileList) return;
 
     const picked = Array.from(fileList).filter((f) =>
@@ -85,6 +136,10 @@ export default function Upload() {
   }
 
   function onBrowse() {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      return;
+    }
     fileInputRef.current?.click();
   }
 
@@ -112,6 +167,12 @@ export default function Upload() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+
+    if (!userEmail) {
+      setShowLoginGate(true);
+      setFormMsg("Must be logged in to upload image.");
+      return;
+    }
 
     if (!canAnalyze) {
       setFormMsg(
@@ -290,8 +351,10 @@ export default function Upload() {
         const last = {
           createdAt: new Date().toISOString(),
           meta,
+          user_email: userEmail,
           analysis: first,
           input: {
+            user_email: userEmail,
             name: form.name,
             age: form.age,
             sex: form.sex,
@@ -321,265 +384,292 @@ export default function Upload() {
   }
 
   return (
-    <main className="container narrow">
-      <section className="section-pad">
-        <h1 className="h-title">Upload</h1>
-        <p className="muted">Drag and drop JPG/PNG files or click to browse.</p>
+    <>
+      <main className="container narrow">
+        <section className="section-pad">
+          <h1 className="h-title">Upload</h1>
+          <p className="muted">Drag and drop JPG/PNG files or click to browse.</p>
 
-        {/* DROPZONE */}
-        <div
-          id="dz"
-          className="dropzone card"
-          tabIndex={0}
-          role="button"
-          aria-label="Upload images dropzone"
-          onClick={onBrowse}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
+          {/* DROPZONE */}
+          <div
+            id="dz"
+            className="dropzone card"
+            tabIndex={0}
+            role="button"
+            aria-label="Upload images dropzone"
+            onClick={onBrowse}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onBrowse();
+              }
+            }}
+            onDragEnter={(e) => {
               e.preventDefault();
-              onBrowse();
-            }
-          }}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDrop={onDrop}
-        >
-          <div style={{ fontSize: "2rem" }}>⬆️</div>
-          <p className="dz-title" style={{ fontWeight: 700 }}>
-            Drag &amp; drop your images here
-          </p>
-          <p className="dz-sub" style={{ color: "var(--muted)" }}>
-            or click to browse
-          </p>
-
-          <label
-            className="file-btn"
-            style={{ marginTop: 10 }}
-            onClick={(e) => e.stopPropagation()}
+              e.stopPropagation();
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={onDrop}
           >
-            Choose File
-            <input
-              ref={fileInputRef}
-              id="fileInput"
-              type="file"
-              accept="image/jpeg,image/png"
-              multiple
-              onChange={(e) => acceptFiles(e.target.files)}
-            />
-          </label>
+            <div style={{ fontSize: "2rem" }}>⬆️</div>
+            <p className="dz-title" style={{ fontWeight: 700 }}>
+              Drag &amp; drop your images here
+            </p>
+            <p className="dz-sub" style={{ color: "var(--muted)" }}>
+              or click to browse
+            </p>
 
-          <p className="q-hint">Tip: Upload multiple images for comparison.</p>
-        </div>
-
-        {/* PREVIEW */}
-        <div
-          id="preview"
-          className="preview"
-          style={{
-            marginTop: 16,
-            display: "grid",
-            gap: 12,
-            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          }}
-        >
-          {previews.map((p) => (
-            <img key={p.url} src={p.url} alt={`Preview: ${p.name}`} />
-          ))}
-        </div>
-
-        {/* FORM */}
-        <form id="intakeForm" className="card" onSubmit={handleSubmit}>
-          <h2 className="h-title" style={{ fontSize: "1.25rem" }}>
-            Patient Intake
-          </h2>
-          <p className="section-sub">
-            Required fields marked with <span className="req">*</span>
-          </p>
-
-          <div className="q-grid">
-            <div className="q-card">
-              <label className="q-label">
-                Full Name <span className="req">*</span>
-              </label>
+            <label
+              className="file-btn"
+              style={{ marginTop: 10 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Choose File
               <input
-                className="q-input"
-                value={form.name}
-                onChange={(e) => updateField("name", e.target.value)}
-                required
+                ref={fileInputRef}
+                id="fileInput"
+                type="file"
+                accept="image/jpeg,image/png"
+                multiple
+                onChange={(e) => acceptFiles(e.target.files)}
               />
-            </div>
+            </label>
 
-            <div className="q-card">
-              <label className="q-label">
-                Age <span className="req">*</span>
-              </label>
-              <input
-                className="q-input"
-                type="number"
-                min="0"
-                max="120"
-                value={form.age}
-                onChange={(e) => updateField("age", e.target.value)}
-                required
-              />
-            </div>
+            <p className="q-hint">Tip: Upload multiple images for comparison.</p>
+          </div>
 
-            <div className="q-card">
-              <label className="q-label">Sex at Birth</label>
-              <select
-                className="q-select"
-                value={form.sex}
-                onChange={(e) => updateField("sex", e.target.value)}
-              >
-                <option value="">Prefer not to say</option>
-                <option>Female</option>
-                <option>Male</option>
-                <option>Intersex</option>
-              </select>
-            </div>
+          {/* PREVIEW */}
+          <div
+            id="preview"
+            className="preview"
+            style={{
+              marginTop: 16,
+              display: "grid",
+              gap: 12,
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+            }}
+          >
+            {previews.map((p) => (
+              <img key={p.url} src={p.url} alt={`Preview: ${p.name}`} />
+            ))}
+          </div>
 
-            <div className="q-card">
-              <label className="q-label">
-                Skin Condition <span className="req">*</span>
-              </label>
-              <select
-                className="q-select"
-                value={form.skinType}
-                onChange={(e) => updateField("skinType", e.target.value)}
-                required
-              >
-                <option value="">Select...</option>
-                <option value="I">I — Very fair</option>
-                <option value="II">II — Fair</option>
-                <option value="III">III — Medium</option>
-                <option value="IV">IV — Olive</option>
-                <option value="V">V — Brown</option>
-                <option value="VI">VI — Dark brown</option>
-              </select>
-            </div>
+          {/* FORM */}
+          <form id="intakeForm" className="card" onSubmit={handleSubmit}>
+            <h2 className="h-title" style={{ fontSize: "1.25rem" }}>
+              Patient Intake
+            </h2>
+            <p className="section-sub">
+              Required fields marked with <span className="req">*</span>
+            </p>
 
-            <div className="q-card">
-              <label className="q-label">
-                Location <span className="req">*</span>
-              </label>
-              <input
-                className="q-input"
-                value={form.location}
-                onChange={(e) => updateField("location", e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="q-card">
-              <label className="q-label">
-                Duration (days) <span className="req">*</span>
-              </label>
-              <input
-                className="q-input"
-                type="number"
-                min="0"
-                max="3650"
-                value={form.duration}
-                onChange={(e) => updateField("duration", e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="q-card" style={{ gridColumn: "1 / -1" }}>
-              <label>
+            <div className="q-grid">
+              <div className="q-card">
+                <label className="q-label">
+                  Full Name <span className="req">*</span>
+                </label>
                 <input
-                  id="consent"
-                  type="checkbox"
-                  checked={form.consent}
-                  onChange={(e) => updateField("consent", e.target.checked)}
-                />{" "}
-                I confirm this image is mine and consent to analysis.
-                <span className="req">*</span>
-              </label>
+                  className="q-input"
+                  value={form.name}
+                  onChange={(e) => updateField("name", e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">
+                  Age <span className="req">*</span>
+                </label>
+                <input
+                  className="q-input"
+                  type="number"
+                  min="0"
+                  max="120"
+                  value={form.age}
+                  onChange={(e) => updateField("age", e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">Sex at Birth</label>
+                <select
+                  className="q-select"
+                  value={form.sex}
+                  onChange={(e) => updateField("sex", e.target.value)}
+                >
+                  <option value="">Prefer not to say</option>
+                  <option>Female</option>
+                  <option>Male</option>
+                  <option>Intersex</option>
+                </select>
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">
+                  Skin Condition <span className="req">*</span>
+                </label>
+                <select
+                  className="q-select"
+                  value={form.skinType}
+                  onChange={(e) => updateField("skinType", e.target.value)}
+                  required
+                >
+                  <option value="">Select...</option>
+                  <option value="I">I — Very fair</option>
+                  <option value="II">II — Fair</option>
+                  <option value="III">III — Medium</option>
+                  <option value="IV">IV — Olive</option>
+                  <option value="V">V — Brown</option>
+                  <option value="VI">VI — Dark brown</option>
+                </select>
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">
+                  Location <span className="req">*</span>
+                </label>
+                <input
+                  className="q-input"
+                  value={form.location}
+                  onChange={(e) => updateField("location", e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">
+                  Duration (days) <span className="req">*</span>
+                </label>
+                <input
+                  className="q-input"
+                  type="number"
+                  min="0"
+                  max="3650"
+                  value={form.duration}
+                  onChange={(e) => updateField("duration", e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label>
+                  <input
+                    id="consent"
+                    type="checkbox"
+                    checked={form.consent}
+                    onChange={(e) => updateField("consent", e.target.checked)}
+                  />{" "}
+                  I confirm this image is mine and consent to analysis.
+                  <span className="req">*</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button
+                className="btn btn-cta"
+                type="submit"
+                disabled={!canAnalyze}
+              >
+                Analyze
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={clearAll}
+              >
+                Clear
+              </button>
+
+              <span id="formMsg" className="q-hint">
+                {formMsg}
+              </span>
+            </div>
+          </form>
+          {/* RESULTS */}
+          <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
+            <h3>Preliminary Analysis</h3>
+
+            <p className="muted">{result?.meta || ""}</p>
+
+            {result?.raw && (
+              <>
+                <div style={{ marginTop: 10 }}>
+                  <strong>Primary Result:</strong>{" "}
+                  <span className="pill">
+                    {result.raw.primary_result ?? "N/A"}
+                  </span>
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <strong>Risk Indicators</strong>
+                  <div style={{ marginTop: 6 }}>
+                    <span className="pill">
+                      High risk:{" "}
+                      {String(result.raw.key_indicators?.high_risk_flag)}
+                    </span>
+                    <span className="pill">
+                      Moderate risk:{" "}
+                      {String(result.raw.key_indicators?.moderate_risk_flag)}
+                    </span>
+                    <span className="pill">
+                      Low risk: {String(result.raw.key_indicators?.low_risk_flag)}
+                    </span>
+                    <span className="pill">
+                      Needs clinician review:{" "}
+                      {String(result.raw.key_indicators?.needs_clinician_review)}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <strong>Top Predictions</strong>
+                  <div style={{ marginTop: 6 }}>
+                    {(result.raw_full?.top_predictions || result.raw?.model_topk || [])
+                      .slice(0, 5)
+                      .map((p, i) => (
+                        <span key={i} className="pill">
+                          {p.label || p["label"]}: {Number(p.confidence ?? p.prob ?? p["confidence"] ?? p["prob"]).toFixed(3)}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          {/* AI explanation moved into chatbot window; assistant message is dispatched to widget */}
+        </section>
+      </main>
+
+      {!userEmail && showLoginGate && (
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="upload-login-gate-title">
+          <div className="modal-content">
+            <h2 id="upload-login-gate-title">Login Required</h2>
+            <p>Must be logged in to upload image.</p>
+            <div className="modal-actions">
+              <button
+                className="btn btn-cta"
+                type="button"
+                onClick={() => navigate("/login?next=/upload")}
+              >
+                Log In
+              </button>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => navigate("/")}
+              >
+                Back Home
+              </button>
             </div>
           </div>
-
-          <div className="form-actions">
-            <button
-              className="btn btn-cta"
-              type="submit"
-              disabled={!canAnalyze}
-            >
-              Analyze
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={clearAll}
-            >
-              Clear
-            </button>
-
-            <span id="formMsg" className="q-hint">
-              {formMsg}
-            </span>
-          </div>
-        </form>
-        {/* RESULTS */}
-        <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
-          <h3>Preliminary Analysis</h3>
-
-          <p className="muted">{result?.meta || ""}</p>
-
-          {result?.raw && (
-            <>
-              <div style={{ marginTop: 10 }}>
-                <strong>Primary Result:</strong>{" "}
-                <span className="pill">
-                  {result.raw.primary_result ?? "N/A"}
-                </span>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <strong>Risk Indicators</strong>
-                <div style={{ marginTop: 6 }}>
-                  <span className="pill">
-                    High risk:{" "}
-                    {String(result.raw.key_indicators?.high_risk_flag)}
-                  </span>
-                  <span className="pill">
-                    Moderate risk:{" "}
-                    {String(result.raw.key_indicators?.moderate_risk_flag)}
-                  </span>
-                  <span className="pill">
-                    Low risk: {String(result.raw.key_indicators?.low_risk_flag)}
-                  </span>
-                  <span className="pill">
-                    Needs clinician review:{" "}
-                    {String(result.raw.key_indicators?.needs_clinician_review)}
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <strong>Top Predictions</strong>
-                <div style={{ marginTop: 6 }}>
-                  {(result.raw_full?.top_predictions || result.raw?.model_topk || [])
-                    .slice(0, 5)
-                    .map((p, i) => (
-                      <span key={i} className="pill">
-                        {p.label || p["label"]}: {Number(p.confidence ?? p.prob ?? p["confidence"] ?? p["prob"]).toFixed(3)}
-                      </span>
-                    ))}
-                </div>
-              </div>
-            </>
-          )}
         </div>
-        {/* AI explanation moved into chatbot window; assistant message is dispatched to widget */}
-      </section>
-    </main>
+      )}
+    </>
   );
 }

@@ -1,5 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+
+const LOGIN_GATE_DELAY_MS = 1000;
+
+function getLoggedInUser() {
+  try {
+    const raw = (localStorage.getItem("skinai_user") || "").trim();
+    if (!raw || raw === "null" || raw === "undefined") {
+      return null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
 
 function fmtPct(x) {
   return (x * 100).toFixed(1) + "%";
@@ -19,20 +33,35 @@ function fmtDate(iso) {
 export default function Reports() {
   const navigate = useNavigate();
 
-  const userEmail = useMemo(() => {
-    try {
-      return localStorage.getItem("skinai_user");
-    } catch {
-      return null;
-    }
+  const [userEmail, setUserEmail] = useState(getLoggedInUser);
+
+  const [showLoginGate, setShowLoginGate] = useState(false);
+
+  useEffect(() => {
+    const syncUser = () => setUserEmail(getLoggedInUser());
+
+    syncUser();
+    window.addEventListener("storage", syncUser);
+    window.addEventListener("focus", syncUser);
+
+    return () => {
+      window.removeEventListener("storage", syncUser);
+      window.removeEventListener("focus", syncUser);
+    };
   }, []);
 
-  // simple auth gate (demo-level, same as old page)
   useEffect(() => {
-    if (!userEmail) {
-      navigate("/login?next=/reports", { replace: true });
+    if (userEmail) {
+      setShowLoginGate(false);
+      return;
     }
-  }, [userEmail, navigate]);
+
+    const timerId = setTimeout(() => {
+      setShowLoginGate(true);
+    }, LOGIN_GATE_DELAY_MS);
+
+    return () => clearTimeout(timerId);
+  }, [userEmail]);
 
   const storageKey = userEmail ? `skinai_reports_${userEmail}` : null;
   const [reports, setReports] = useState([]);
@@ -42,9 +71,16 @@ export default function Reports() {
     const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
 
     async function load() {
+      if (!userEmail) {
+        setReports([]);
+        return;
+      }
+
       if (API_BASE) {
         try {
-          const res = await fetch(`${API_BASE}/reports`);
+          const res = await fetch(
+            `${API_BASE}/reports?user_email=${encodeURIComponent(userEmail)}`,
+          );
           if (res.ok) {
             const js = await res.json();
             if (Array.isArray(js) && js.length > 0) {
@@ -64,7 +100,7 @@ export default function Reports() {
     }
 
     load();
-  }, [storageKey]);
+  }, [storageKey, userEmail]);
 
   function signOut() {
     localStorage.removeItem("skinai_user");
@@ -72,12 +108,22 @@ export default function Reports() {
   }
 
   function deleteReport(id) {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      return;
+    }
+
     const next = reports.filter((r) => r.id !== id);
     setReports(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
   }
 
   function downloadReport(report) {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      return;
+    }
+
     const blob = new Blob([JSON.stringify(report, null, 2)], {
       type: "application/json",
     });
@@ -111,9 +157,19 @@ export default function Reports() {
             <span className="muted">
               {userEmail ? `Signed in as ${userEmail}` : ""}
             </span>
-            <button className="btn" style={{ marginLeft: 8 }} onClick={signOut}>
-              Sign out
-            </button>
+            {userEmail ? (
+              <button className="btn" style={{ marginLeft: 8 }} onClick={signOut}>
+                Sign out
+              </button>
+            ) : (
+              <button
+                className="btn btn-secondary"
+                style={{ marginLeft: 8 }}
+                onClick={() => navigate("/login?next=/reports")}
+              >
+                Log in
+              </button>
+            )}
           </div>
         </div>
 
@@ -208,6 +264,31 @@ export default function Reports() {
           </div>
         )}
       </section>
+
+      {!userEmail && showLoginGate && (
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="reports-login-gate-title">
+          <div className="modal-content">
+            <h2 id="reports-login-gate-title">Login Required</h2>
+            <p>Must be logged in to view reports.</p>
+            <div className="modal-actions">
+              <button
+                className="btn btn-cta"
+                type="button"
+                onClick={() => navigate("/login?next=/reports")}
+              >
+                Log In
+              </button>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => navigate("/")}
+              >
+                Back Home
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
