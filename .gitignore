@@ -40,3 +40,4 @@ Thumbs.db
 # ----------------------
 front-end-temp/
 *.keras
+resnet50_skin_disease_finetuned.keras

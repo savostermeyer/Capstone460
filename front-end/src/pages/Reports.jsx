@@ -49,22 +49,24 @@ function fmtDate(iso) {
 // Heuristic “low confidence / uncertain” rule (NOT a medical standard)
 function needsClinicianPrompt(top1, top2) {
   if (!top1) return true;
-
   const top1c = typeof top1.confidence === "number" ? top1.confidence : 0;
   const top2c = typeof top2?.confidence === "number" ? top2?.confidence : 0;
 
   if (top1c < 0.6) return true;
   if (Math.abs(top1c - top2c) < 0.1) return true;
-
   return false;
 }
 
 async function fetchImageObjectUrl({ apiBase, imageId, signal }) {
-  const res = await fetch(`${apiBase}/api/images/${encodeURIComponent(imageId)}`, {
-    method: "GET",
-    credentials: "include",
-    signal,
-  });
+  const res = await fetch(
+    `${apiBase}/api/images/${encodeURIComponent(imageId)}`,
+    {
+      method: "GET",
+      credentials: "include",
+      signal,
+    }
+  );
+
   if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
   const blob = await res.blob();
   return URL.createObjectURL(blob);
@@ -83,10 +85,8 @@ async function tryFetchReportsFromApi({ apiBase, signal }) {
   if (!contentType.includes("application/json")) return null;
 
   const data = await res.json();
-
   if (Array.isArray(data)) return data;
   if (data && Array.isArray(data.reports)) return data.reports;
-
   return null;
 }
 
@@ -113,73 +113,101 @@ function downloadHtmlReport({ report, imageUrls, userEmail }) {
       const key = img.imageId || img.filename;
       const url = imageUrls[key];
       if (!url) return "";
-      return `<div style="margin: 10px 0;">
-        <div style="color:#666; font-size: 12px; margin-bottom: 6px;">${img.filename || ""}</div>
-        <img src="${url}" style="max-width: 100%; border: 1px solid #ddd; border-radius: 8px;" />
-      </div>`;
+
+      return `
+        <div style="margin: 10px 0;">
+          <div style="color:#666; font-size: 12px; margin-bottom: 6px;">
+            ${img.filename || ""}
+          </div>
+          <img
+            src="${url}"
+            style="max-width: 100%; border: 1px solid #ddd; border-radius: 8px;"
+          />
+        </div>
+      `;
     })
     .join("");
 
   const predsHtml = top.length
-    ? `<ol>
+    ? `
+      <ol>
         ${top
           .map((p) => {
-            const label = CLASS_LABELS[p.code] || p.label || p.code || "Unknown";
+            const label =
+              CLASS_LABELS[p.code] || p.label || p.code || "Unknown";
             const desc = CLASS_DESCRIPTIONS[p.code] || "";
             const pct = fmtPct(p.confidence);
-            return `<li style="margin-bottom: 10px;">
-              <div><strong>${label}</strong> — ${pct}</div>
-              <div style="color:#444; margin-top: 4px;">${desc}</div>
-            </li>`;
+
+            return `
+              <li style="margin-bottom: 10px;">
+                <div><strong>${label}</strong> — ${pct}</div>
+                <div style="color:#444; margin-top: 4px;">${desc}</div>
+              </li>
+            `;
           })
           .join("")}
-      </ol>`
+      </ol>
+    `
     : `<p><em>No predictions available yet.</em></p>`;
 
   const html = `<!doctype html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>SkinAI Report</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
-    .muted { color: #555; }
-    .warn { background: #fff3cd; border: 1px solid #ffe69c; padding: 12px; border-radius: 10px; }
-    .box { border: 1px solid #ddd; padding: 14px; border-radius: 12px; margin-top: 12px; }
-    h1 { margin: 0 0 6px 0; }
-  </style>
-</head>
-<body>
-  <h1>SkinAI Report</h1>
-  <div class="muted">Generated: ${fmtDate(report.createdAt)} ${userEmail ? `• User: ${userEmail}` : ""}</div>
+  <head>
+    <meta charset="utf-8" />
+    <title>SkinAI Report</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+      .muted { color: #555; }
+      .warn { background: #fff3cd; border: 1px solid #ffe69c; padding: 12px; border-radius: 10px; }
+      .box { border: 1px solid #ddd; padding: 14px; border-radius: 12px; margin-top: 12px; }
+      h1 { margin: 0 0 6px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>SkinAI Report</h1>
+    <div class="muted">
+      Generated: ${fmtDate(report.createdAt)}
+      ${userEmail ? ` • User: ${userEmail}` : ""}
+    </div>
 
-  <div class="box">
-    <h2 style="margin:0 0 10px 0;">Images</h2>
-    ${imagesHtml || "<p><em>No images available.</em></p>"}
-  </div>
+    <div class="box">
+      <h2 style="margin:0 0 10px 0;">Images</h2>
+      ${imagesHtml || "<p><em>No images available.</em></p>"}
+    </div>
 
-  <div class="box">
-    <h2 style="margin:0 0 10px 0;">Top 3 Predictions</h2>
-    ${predsHtml}
-  </div>
+    <div class="box">
+      <h2 style="margin:0 0 10px 0;">Top 3 Predictions</h2>
+      ${predsHtml}
+    </div>
 
-  <div class="warn" style="margin-top: 14px;">
-    <strong>Important:</strong> This report is generated by an AI model and is <strong>not</strong> a medical diagnosis.
-    If you are concerned, or if the lesion is new, changing, painful, bleeding, or irregular, seek evaluation by a licensed clinician.
-    ${uncertain ? "<div style='margin-top:8px;'><strong>Low confidence / uncertain result:</strong> We recommend consulting a dermatologist for an accurate assessment.</div>" : ""}
-  </div>
-</body>
+    <div class="warn" style="margin-top: 14px;">
+      <strong>Important:</strong> This report is generated by an AI model and is
+      <strong>not</strong> a medical diagnosis. If you are concerned, or if the
+      lesion is new, changing, painful, bleeding, or irregular, seek evaluation
+      by a licensed clinician.
+      ${
+        uncertain
+          ? `<div style="margin-top:8px;">
+              <strong>Low confidence / uncertain result:</strong>
+              We recommend consulting a dermatologist for an accurate assessment.
+            </div>`
+          : ""
+      }
+    </div>
+  </body>
 </html>`;
 
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
+
   const a = document.createElement("a");
   a.href = url;
   a.download = `skinai_report_${report.id || "report"}.html`;
   document.body.appendChild(a);
   a.click();
   a.remove();
+
   URL.revokeObjectURL(url);
 }
 
@@ -205,6 +233,7 @@ export default function Reports() {
 
   // Map (imageId or filename) -> objectURL
   const [imageUrls, setImageUrls] = useState({});
+
   const urlCleanupRef = useRef(new Set());
 
   // Load reports: API first, then localStorage
@@ -222,6 +251,7 @@ export default function Reports() {
           apiBase: API_BASE,
           signal: controller.signal,
         });
+
         if (apiReports) {
           setReports(apiReports);
           setLoading(false);
@@ -255,6 +285,7 @@ export default function Reports() {
   // - Else => try sessionStorage preview (Upload put it there)
   useEffect(() => {
     if (!isLoggedIn) return;
+
     const controller = new AbortController();
 
     async function loadImages() {
@@ -355,6 +386,7 @@ export default function Reports() {
     // Always update UI + localStorage
     const next = reports.filter((r) => r.id !== id);
     setReports(next);
+
     try {
       localStorage.setItem(storageKey, JSON.stringify(next));
     } catch {}
@@ -374,8 +406,12 @@ export default function Reports() {
           </h1>
 
           <div className="card">
-            <p style={{ marginTop: 0 }}>You must be logged in to view reports.</p>
-            <p className="muted">Log in to access saved analysis results and download reports.</p>
+            <p style={{ marginTop: 0 }}>
+              You must be logged in to view reports.
+            </p>
+            <p className="muted">
+              Log in to access saved analysis results and download reports.
+            </p>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Link className="btn btn-cta" to="/login">
@@ -408,7 +444,9 @@ export default function Reports() {
           </h1>
 
           <div>
-            <span className="muted">{userEmail ? `Signed in as ${userEmail}` : ""}</span>
+            <span className="muted">
+              {userEmail ? `Signed in as ${userEmail}` : ""}
+            </span>
             <button className="btn" style={{ marginLeft: 8 }} onClick={signOut}>
               Sign out
             </button>
@@ -437,7 +475,9 @@ export default function Reports() {
 
         {!loading && reports.length === 0 ? (
           <div className="card">
-            <p style={{ marginTop: 0 }}>No reports yet. Upload images to generate your first report.</p>
+            <p style={{ marginTop: 0 }}>
+              No reports yet. Upload images to generate your first report.
+            </p>
             <Link className="btn btn-cta" to="/upload">
               Go to Upload
             </Link>
@@ -480,6 +520,7 @@ export default function Reports() {
                   {/* Images */}
                   <div style={{ marginTop: 12 }}>
                     <strong>Image(s)</strong>
+
                     <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
                       {(r.images || []).map((img, idx) => {
                         const key = img.imageId || img.filename || String(idx);
@@ -493,6 +534,7 @@ export default function Reports() {
                             <div className="muted" style={{ fontSize: 12 }}>
                               {img.filename || img.imageId || "Image"}
                             </div>
+
                             {url ? (
                               <img
                                 src={url}
@@ -519,21 +561,27 @@ export default function Reports() {
 
                     {top.length === 0 ? (
                       <p className="muted" style={{ marginTop: 6 }}>
-                        No predictions available yet. Backend analysis may still be in progress.
+                        No predictions available yet. Backend analysis may still be
+                        in progress.
                       </p>
                     ) : (
                       <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
                         {top.map((p, i) => {
-                          const label = CLASS_LABELS[p.code] || p.label || p.code || "Unknown";
+                          const label =
+                            CLASS_LABELS[p.code] || p.label || p.code || "Unknown";
                           const desc = CLASS_DESCRIPTIONS[p.code] || "";
+
                           return (
                             <div key={`${p.code || p.label}-${i}`}>
                               <div>
                                 <strong>
                                   {i + 1}. {label}
                                 </strong>{" "}
-                                <span className="muted">— {fmtPct(p.confidence)}</span>
+                                <span className="muted">
+                                  — {fmtPct(p.confidence)}
+                                </span>
                               </div>
+
                               {desc && (
                                 <div className="muted" style={{ marginTop: 4 }}>
                                   {desc}
@@ -557,17 +605,20 @@ export default function Reports() {
                       <div style={{ fontWeight: 800, marginBottom: 6 }}>
                         Important medical note
                       </div>
+
                       <div className="muted">
-                        This output is generated by an AI model and is <strong>not</strong> a medical
-                        diagnosis. If the lesion is new, changing, painful, bleeding, or irregular,
-                        seek evaluation by a licensed clinician.
+                        This output is generated by an AI model and is{" "}
+                        <strong>not</strong> a medical diagnosis. If the lesion is
+                        new, changing, painful, bleeding, or irregular, seek
+                        evaluation by a licensed clinician.
                       </div>
 
                       {uncertain && (
                         <div className="muted" style={{ marginTop: 10 }}>
-                          <strong>Low confidence / uncertain:</strong> The model confidence is low or
-                          the top predictions are close. We recommend consulting a dermatologist for
-                          an accurate assessment.
+                          <strong>Low confidence / uncertain:</strong> The model
+                          confidence is low or the top predictions are close. We
+                          recommend consulting a dermatologist for an accurate
+                          assessment.
                         </div>
                       )}
                     </div>
@@ -577,7 +628,9 @@ export default function Reports() {
                   <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                     <button
                       className="btn btn-cta"
-                      onClick={() => downloadHtmlReport({ report: r, imageUrls, userEmail })}
+                      onClick={() =>
+                        downloadHtmlReport({ report: r, imageUrls, userEmail })
+                      }
                     >
                       Download Report
                     </button>
