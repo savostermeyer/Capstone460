@@ -262,8 +262,18 @@ body {
 }
 
 .login-card {
-  background: #e8e6e6;
-  border-color: #454343;
+  background: var(--gold);
+  border-color: #dbc88f;
+}
+
+.login-submit-btn {
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  color: #111;
+}
+
+.login-submit-btn:hover {
+  filter: brightness(0.85);
 }
 
 .team-grid {
