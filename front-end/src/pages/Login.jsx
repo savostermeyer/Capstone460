@@ -81,11 +81,11 @@ export default function Login() {
             : "Sign in to access your saved analysis reports."}
         </p>
 
-        <div className="card" role="region" aria-label="Login form">
+        <div className="card login-card" role="region" aria-label="Login form">
           <form id="login-form" autoComplete="on" noValidate onSubmit={onSubmit}>
             <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
               <label>
-                <span style={{ display: "block", marginBottom: 6 }}>Email</span>
+                <span style={{ display: "block", marginBottom: 6, color: "#000" }}>Email</span>
                 <input
                   id="email"
                   name="email"
@@ -98,15 +98,15 @@ export default function Login() {
                     width: "100%",
                     padding: 10,
                     borderRadius: 8,
-                    border: "1px solid #2a2a2a",
-                    background: "#0f0f0f",
-                    color: "#ededed",
+                    border: "1px solid #cfcfcf",
+                    background: "#fff",
+                    color: "#000",
                   }}
                 />
               </label>
 
               <label>
-                <span style={{ display: "block", marginBottom: 6 }}>
+                <span style={{ display: "block", marginBottom: 6, color: "#000" }}>
                   Password
                 </span>
                 <input
@@ -122,9 +122,9 @@ export default function Login() {
                     width: "100%",
                     padding: 10,
                     borderRadius: 8,
-                    border: "1px solid #2a2a2a",
-                    background: "#0f0f0f",
-                    color: "#ededed",
+                    border: "1px solid #cfcfcf",
+                    background: "#fff",
+                    color: "#000",
                   }}
                 />
               </label>

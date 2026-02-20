@@ -261,6 +261,11 @@ body {
   margin-top: 12px;
 }
 
+.login-card {
+  background: #e8e6e6;
+  border-color: #454343;
+}
+
 .team-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
