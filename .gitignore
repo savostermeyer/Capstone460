@@ -42,3 +42,4 @@ front-end-temp/
 
 
 resnet50_skin_disease_finetuned.keras
+back-end/src/models/resnet50_skin_disease_finetuned_v4.keras
