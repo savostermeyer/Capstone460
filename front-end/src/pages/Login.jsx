@@ -129,7 +129,7 @@ export default function Login() {
                 />
               </label>
 
-              <button type="submit" className="btn btn-cta">
+              <button type="submit" className="btn btn-cta login-submit-btn">
                 {isSignup ? "Create Account" : "Sign In"}
               </button>
 
