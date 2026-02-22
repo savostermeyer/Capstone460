@@ -133,6 +133,34 @@
   background: #111;
 }
 
+#chatbot-attach {
+  width: 38px;
+  border-radius: 10px;
+  border: 1px solid #2a2a2a;
+  background: #0f0f0f;
+  color: #ededed;
+  cursor: pointer;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chatbot-attach-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+#chatbot-attach:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#chatbot-attach:hover:not(:disabled) {
+  background: rgba(214, 170, 0, 0.15);
+}
+
 #chatbot-input {
   flex: 1;
   padding: 10px 12px;
@@ -162,5 +190,37 @@
 }
 
 #chatbot-send:hover:not(:disabled) {
+  background: rgba(214, 170, 0, 0.15);
+}
+
+#chatbot-attachment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 10px;
+  background: #111;
+  border-top: 1px dashed #2a2a2a;
+}
+
+#chatbot-attachment-name {
+  color: #ededed;
+  font-size: 0.85rem;
+  max-width: 75%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#chatbot-attachment-remove {
+  border: 1px solid #2a2a2a;
+  background: #0f0f0f;
+  color: #ededed;
+  border-radius: 8px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+#chatbot-attachment-remove:hover {
   background: rgba(214, 170, 0, 0.15);
 }

@@ -18,6 +18,77 @@ function getLoggedInUser() {
   }
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+const DISEASE_LABELS = {
+  akiec: "Actinic keratoses and intraepithelial carcinoma (Bowen disease)",
+  bcc: "Basal cell carcinoma",
+  bkl: "Benign keratosis (seborrheic keratosis, lichen planus-like keratosis)",
+  df: "Dermatofibroma",
+  mel: "Melanoma",
+  nv: "Melanocytic nevus",
+  vasc: "Vascular lesion (angioma, angiokeratoma, hemorrhage)",
+};
+
+const DISEASE_DESCRIPTIONS = {
+  akiec: "Precancerous, sun-related scaly lesions that can evolve over time.",
+  bcc: "Slow-growing skin cancer; often appears as a pearly or ulcerated bump.",
+  bkl: "Common, benign growths with a waxy or stuck-on appearance.",
+  df: "Benign, firm skin nodule, often on legs or arms.",
+  mel: "Potentially aggressive skin cancer; needs prompt evaluation.",
+  nv: "Common benign mole; usually stable in shape and color.",
+  vasc: "Benign blood-vessel lesion; may appear red, purple, or blue.",
+};
+
+function normalizeLabel(label) {
+  if (!label) return "Unknown";
+  const raw = String(label).trim();
+  const key = raw.toLowerCase();
+  if (DISEASE_LABELS[key]) return DISEASE_LABELS[key];
+  return raw;
+}
+
+function predictionDescription(label) {
+  if (!label) return "";
+  const key = String(label).trim().toLowerCase();
+  if (DISEASE_DESCRIPTIONS[key]) return DISEASE_DESCRIPTIONS[key];
+
+  const normalized = normalizeLabel(label).toLowerCase();
+  const matchKey = Object.keys(DISEASE_LABELS).find(
+    (abbr) => DISEASE_LABELS[abbr].toLowerCase() === normalized,
+  );
+  if (matchKey && DISEASE_DESCRIPTIONS[matchKey]) {
+    return DISEASE_DESCRIPTIONS[matchKey];
+  }
+
+  return "Consider a clinician review to confirm and correlate clinically.";
+}
+
+function fmtPct(x) {
+  return (x * 100).toFixed(1) + "%";
+}
+
+function nextStepForRisk(riskScore) {
+  const score = String(riskScore || "").toLowerCase();
+  if (score === "high_risk" || score === "high") {
+    return "Schedule an urgent dermatology visit and avoid delays.";
+  }
+  if (score === "moderate_risk" || score === "moderate") {
+    return "Book a dermatology appointment within the next few weeks.";
+  }
+  if (score === "low_risk" || score === "low") {
+    return "Monitor for changes and practice sun protection; see a clinician if it changes.";
+  }
+  return "Seek medical advice if you are concerned or notice changes.";
+}
+
 export default function Upload() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -31,6 +102,12 @@ export default function Upload() {
     skinType: "",
     location: "",
     duration: "",
+    primarySymptoms: [],
+    medicalBackground: "",
+    familyHistory: "",
+    sunExposure: "",
+    spfUse: "",
+    currentMedications: "",
     consent: false,
   });
   const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
@@ -99,6 +176,7 @@ export default function Upload() {
     const requiredFilled =
       form.name.trim() &&
       String(form.age).trim() &&
+      form.sex &&
       form.skinType &&
       form.location.trim() &&
       String(form.duration).trim();
@@ -124,6 +202,11 @@ export default function Upload() {
       return;
     }
 
+    if (picked.length > 20) {
+      setFormMsg("Maximum 20 images allowed. Please select fewer images.");
+      return;
+    }
+
     setFormMsg("");
     setResult(null);
     setFiles(picked);
@@ -143,8 +226,23 @@ export default function Upload() {
     fileInputRef.current?.click();
   }
 
+  function deleteImage(index) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setResult(null);
+  }
+
   function updateField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setResult(null);
+  }
+
+  function toggleSymptom(symptom) {
+    setForm((prev) => ({
+      ...prev,
+      primarySymptoms: prev.primarySymptoms.includes(symptom)
+        ? prev.primarySymptoms.filter((s) => s !== symptom)
+        : [...prev.primarySymptoms, symptom],
+    }));
     setResult(null);
   }
 
@@ -160,6 +258,12 @@ export default function Upload() {
       skinType: "",
       location: "",
       duration: "",
+      primarySymptoms: [],
+      medicalBackground: "",
+      familyHistory: "",
+      sunExposure: "",
+      spfUse: "",
+      currentMedications: "",
       consent: false,
     });
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -206,6 +310,12 @@ export default function Upload() {
         formData.append("skinType", form.skinType);
         formData.append("location", form.location);
         formData.append("duration_days", String(form.duration));
+        formData.append("primarySymptoms", form.primarySymptoms.join(", "));
+        formData.append("medicalBackground", form.medicalBackground);
+        formData.append("familyHistory", form.familyHistory);
+        formData.append("sunExposure", form.sunExposure);
+        formData.append("spfUse", form.spfUse);
+        formData.append("currentMedications", form.currentMedications);
         formData.append("consent", String(form.consent));
         formData.append("uploadDate", new Date().toISOString());
 
@@ -306,6 +416,12 @@ export default function Upload() {
       chatData.append("skinType", form.skinType);
       chatData.append("location", form.location);
       chatData.append("duration_days", String(form.duration));
+      chatData.append("primarySymptoms", form.primarySymptoms.join(", "));
+      chatData.append("medicalBackground", form.medicalBackground);
+      chatData.append("familyHistory", form.familyHistory);
+      chatData.append("sunExposure", form.sunExposure);
+      chatData.append("spfUse", form.spfUse);
+      chatData.append("currentMedications", form.currentMedications);
 
       chatData.append("primary_result", normalized.primary_result ?? "");
       chatData.append("facts", JSON.stringify(normalized.facts ?? {}));
@@ -348,11 +464,25 @@ export default function Upload() {
 
       // Save lastAnalysis to localStorage with timestamp & input metadata
       try {
+        let images = [];
+        try {
+          images = await Promise.all(
+            files.map(async (file) => ({
+              name: file.name,
+              dataUrl: await readFileAsDataUrl(file),
+            }))
+          );
+        } catch (e) {
+          console.warn("Could not read image previews for report", e);
+        }
+
         const last = {
+          id: "report_" + Date.now() + "_" + Math.random().toString(36).substring(2, 9),
           createdAt: new Date().toISOString(),
           meta,
           user_email: userEmail,
           analysis: first,
+          images,
           input: {
             user_email: userEmail,
             name: form.name,
@@ -361,6 +491,12 @@ export default function Upload() {
             skinType: form.skinType,
             location: form.location,
             duration_days: form.duration,
+            primarySymptoms: form.primarySymptoms.join(", "),
+            medicalBackground: form.medicalBackground,
+            familyHistory: form.familyHistory,
+            sunExposure: form.sunExposure,
+            spfUse: form.spfUse,
+            currentMedications: form.currentMedications,
           },
         };
         localStorage.setItem("lastAnalysis", JSON.stringify(last));
@@ -414,7 +550,6 @@ export default function Upload() {
             }}
             onDrop={onDrop}
           >
-            <div style={{ fontSize: "2rem" }}>⬆️</div>
             <p className="dz-title" style={{ fontWeight: 700 }}>
               Drag &amp; drop your images here
             </p>
@@ -422,9 +557,11 @@ export default function Upload() {
               or click to browse
             </p>
 
+            <div style={{ fontSize: "2.5rem", margin: "12px 0", animation: "bounce 2s infinite" }}>⬆️</div>
+
             <label
               className="file-btn"
-              style={{ marginTop: 10 }}
+              style={{ marginTop: 10, backgroundColor: "#4CAF50", borderColor: "#388E3C" }}
               onClick={(e) => e.stopPropagation()}
             >
               Choose File
@@ -439,22 +576,105 @@ export default function Upload() {
             </label>
 
             <p className="q-hint">Tip: Upload multiple images for comparison.</p>
+            <p className="q-hint">Max 20 images</p>
           </div>
 
           {/* PREVIEW */}
           <div
             id="preview"
-            className="preview"
+            className="preview-container"
             style={{
               marginTop: 16,
-              display: "grid",
-              gap: 12,
-              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              maxHeight: 300,
+              overflow: "auto",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              padding: previews.length > 0 ? 12 : 0,
+              backgroundColor: previews.length > 0 ? "var(--bg-alt)" : "transparent",
             }}
           >
-            {previews.map((p) => (
-              <img key={p.url} src={p.url} alt={`Preview: ${p.name}`} />
-            ))}
+            {previews.length === 0 ? (
+              <p className="muted" style={{ textAlign: "center", padding: 12 }}>
+                No images selected yet
+              </p>
+            ) : (
+              <div
+                className="preview"
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                }}
+              >
+                {previews.map((p, idx) => (
+                  <div
+                    key={p.url}
+                    className="preview-item"
+                    style={{
+                      position: "relative",
+                      overflow: "hidden",
+                      borderRadius: "var(--radius)",
+                      backgroundColor: "white",
+                    }}
+                  >
+                    <img
+                      src={p.url}
+                      alt={`Preview: ${p.name}`}
+                      style={{
+                        width: "100%",
+                        height: "150px",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        backgroundColor: "rgba(0,0,0,0.7)",
+                        color: "white",
+                        padding: "4px 6px",
+                        fontSize: "0.75rem",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={p.name}
+                    >
+                      {p.name}
+                    </div>
+                    <button
+                      type="button"
+                      className="preview-delete-btn"
+                      onClick={() => deleteImage(idx)}
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        right: 4,
+                        backgroundColor: "rgba(255, 59, 48, 0.9)",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "50%",
+                        width: 28,
+                        height: 28,
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        fontSize: "1.2rem",
+                        fontWeight: "bold",
+                      }}
+                      aria-label={`Delete ${p.name}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* FORM */}
@@ -495,13 +715,16 @@ export default function Upload() {
               </div>
 
               <div className="q-card">
-                <label className="q-label">Sex at Birth</label>
+                <label className="q-label">
+                  Sex <span className="req">*</span>
+                </label>
                 <select
                   className="q-select"
                   value={form.sex}
                   onChange={(e) => updateField("sex", e.target.value)}
+                  required
                 >
-                  <option value="">Prefer not to say</option>
+                  <option value="">Select...</option>
                   <option>Female</option>
                   <option>Male</option>
                   <option>Intersex</option>
@@ -556,6 +779,92 @@ export default function Upload() {
               </div>
 
               <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label className="q-label">Primary Symptoms</label>
+                <div className="checkbox-grid">
+                  {["Itching", "Bleeding", "Pain", "Rapid change", "Discoloration", "Other"].map((symptom) => (
+                    <label key={symptom} className="checkbox-item">
+                      <input
+                        type="checkbox"
+                        checked={form.primarySymptoms.includes(symptom)}
+                        onChange={() => toggleSymptom(symptom)}
+                      />
+                      {symptom}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label className="q-label">Medical Background</label>
+                <textarea
+                  className="q-input"
+                  value={form.medicalBackground}
+                  onChange={(e) => updateField("medicalBackground", e.target.value)}
+                  placeholder="List relevant medical conditions, treatments, or procedures..."
+                  style={{ minHeight: 80, resize: "vertical" }}
+                />
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">Family History</label>
+                <select
+                  className="q-select"
+                  value={form.familyHistory}
+                  onChange={(e) => updateField("familyHistory", e.target.value)}
+                >
+                  <option value="">Select...</option>
+                  <option>Skin cancer in family</option>
+                  <option>Melanoma in family</option>
+                  <option>Both skin cancer and melanoma</option>
+                  <option>No family history</option>
+                  <option>Unknown</option>
+                </select>
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">Sun Exposure</label>
+                <select
+                  className="q-select"
+                  value={form.sunExposure}
+                  onChange={(e) => updateField("sunExposure", e.target.value)}
+                >
+                  <option value="">Select...</option>
+                  <option>Minimal</option>
+                  <option>Moderate</option>
+                  <option>High</option>
+                  <option>Very high (outdoor work)</option>
+                  <option>History of severe sunburns</option>
+                </select>
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">SPF Use</label>
+                <select
+                  className="q-select"
+                  value={form.spfUse}
+                  onChange={(e) => updateField("spfUse", e.target.value)}
+                >
+                  <option value="">Select...</option>
+                  <option>Never</option>
+                  <option>Rarely</option>
+                  <option>Sometimes</option>
+                  <option>Usually</option>
+                  <option>Always</option>
+                </select>
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label className="q-label">Current Medications</label>
+                <textarea
+                  className="q-input"
+                  value={form.currentMedications}
+                  onChange={(e) => updateField("currentMedications", e.target.value)}
+                  placeholder="List current medications, supplements, or treatments..."
+                  style={{ minHeight: 80, resize: "vertical" }}
+                />
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
                 <label>
                   <input
                     id="consent"
@@ -593,51 +902,51 @@ export default function Upload() {
           </form>
           {/* RESULTS */}
           <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
-            <h3>Preliminary Analysis</h3>
+            <h2 style={{ fontSize: "1.25rem", marginBottom: 12 }}>Preliminary Analysis</h2>
 
-            <p className="muted">{result?.meta || ""}</p>
+            <p className="muted" style={{ marginBottom: 16 }}>{result?.meta || ""}</p>
 
             {result?.raw && (
               <>
                 <div style={{ marginTop: 10 }}>
-                  <strong>Primary Result:</strong>{" "}
-                  <span className="pill">
-                    {result.raw.primary_result ?? "N/A"}
-                  </span>
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <strong>Risk Indicators</strong>
+                  <strong>Primary Result</strong>
                   <div style={{ marginTop: 6 }}>
                     <span className="pill">
-                      High risk:{" "}
-                      {String(result.raw.key_indicators?.high_risk_flag)}
-                    </span>
-                    <span className="pill">
-                      Moderate risk:{" "}
-                      {String(result.raw.key_indicators?.moderate_risk_flag)}
-                    </span>
-                    <span className="pill">
-                      Low risk: {String(result.raw.key_indicators?.low_risk_flag)}
-                    </span>
-                    <span className="pill">
-                      Needs clinician review:{" "}
-                      {String(result.raw.key_indicators?.needs_clinician_review)}
+                      {result.raw.primary_result ?? "N/A"}
                     </span>
                   </div>
                 </div>
 
-                <div style={{ marginTop: 10 }}>
-                  <strong>Top Predictions</strong>
-                  <div style={{ marginTop: 6 }}>
+                <div style={{ marginTop: 22 }}>
+                  <strong style={{ color: "#4a9ff5" }}>Top 3 predictions</strong>
+                  <div className="report-predictions">
                     {(result.raw_full?.top_predictions || result.raw?.model_topk || [])
-                      .slice(0, 5)
-                      .map((p, i) => (
-                        <span key={i} className="pill">
-                          {p.label || p["label"]}: {Number(p.confidence ?? p.prob ?? p["confidence"] ?? p["prob"]).toFixed(3)}
-                        </span>
-                      ))}
+                      .slice(0, 3)
+                      .map((p, i) => {
+                        const label = p.label || p.name || "Unknown";
+                        const confidence = p.confidence ?? p.prob ?? 0;
+                        return (
+                          <div key={i} className="report-prediction">
+                            <div>
+                              <strong>{normalizeLabel(label)}</strong>
+                              <span className="report-prediction-score">
+                                {fmtPct(confidence)}
+                              </span>
+                            </div>
+                            <div className="muted report-prediction-desc">
+                              {predictionDescription(label)}
+                            </div>
+                          </div>
+                        );
+                      })}
                   </div>
+                </div>
+
+                <div className="report-next-step">
+                  <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
+                  <p className="muted" style={{ marginTop: 6 }}>
+                    {nextStepForRisk(result.raw.primary_result)}
+                  </p>
                 </div>
               </>
             )}

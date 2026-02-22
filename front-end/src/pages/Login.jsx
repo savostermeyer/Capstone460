@@ -71,7 +71,7 @@ export default function Login() {
 
   return (
     <main className="container narrow">
-      <section className="section-pad" aria-labelledby="login-title">
+      <section className="section-pad" style={{ textAlign: "center" }} aria-labelledby="login-title">
         <h1 id="login-title" className="h-title">
           {isSignup ? "Create Account" : "Login"}
         </h1>
@@ -83,9 +83,9 @@ export default function Login() {
 
         <div className="card login-card" role="region" aria-label="Login form">
           <form id="login-form" autoComplete="on" noValidate onSubmit={onSubmit}>
-            <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, color: "#000" }}>Email</span>
+            <div style={{ display: "grid", gap: 8, maxWidth: 380 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <span style={{ color: "#000", minWidth: 70, whiteSpace: "nowrap" }}>Email</span>
                 <input
                   id="email"
                   name="email"
@@ -95,7 +95,7 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   style={{
-                    width: "100%",
+                    flex: 1,
                     padding: 10,
                     borderRadius: 8,
                     border: "1px solid #cfcfcf",
@@ -105,8 +105,8 @@ export default function Login() {
                 />
               </label>
 
-              <label>
-                <span style={{ display: "block", marginBottom: 6, color: "#000" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <span style={{ color: "#000", minWidth: 70, whiteSpace: "nowrap" }}>
                   Password
                 </span>
                 <input
@@ -119,7 +119,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   style={{
-                    width: "100%",
+                    flex: 1,
                     padding: 10,
                     borderRadius: 8,
                     border: "1px solid #cfcfcf",
@@ -133,14 +133,14 @@ export default function Login() {
                 {isSignup ? "Create Account" : "Sign In"}
               </button>
 
-              <p id="login-msg" className="muted" aria-live="polite" style={{ marginTop: 4 }}>
+              <p id="login-msg" className="muted" aria-live="polite" style={{ marginTop: 0 }}>
                 {msg}
               </p>
 
               <div style={{
                 textAlign: "center",
-                marginTop: 16,
-                paddingTop: 16,
+                marginTop: 4,
+                paddingTop: 4,
                 borderTop: "1px solid #2a2a2a"
               }}>
                 <span style={{ color: "#888", fontSize: "0.9rem" }}>

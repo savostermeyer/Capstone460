@@ -1,28 +1,51 @@
-# Running the Project (Development)
+# SkinAI Project - Quick Start
 
-This project requires **three terminals**:  
-one for the backend, one for the frontend, and one to run the server.
+You need **3 terminals** running at the same time.
 
 ---
 
-## Backend (Python / Flask)
+## TERMINAL 1️⃣ - Backend
 
-From the project root:
-
-## From the project root:
-cd back-end/src
+```bash
+cd back-end\src
 python -m expertSystem.app
+```
 
-## Frontend, From the project root:
-## Open 2nd Terminal 
- 
+Wait for: `Running on http://localhost:3720`
+
+---
+
+## TERMINAL 2️⃣ - Frontend
+
+```bash
 cd front-end
-npm i
 npm run dev
+```
 
-## Server, From the project root:
-## Open Third Terminal
+Wait for: `Local: http://localhost:5173/` (or 5174)
 
+---
+
+## TERMINAL 3️⃣ - Server
+
+```bash
 npm i
 node server.js
+```
+
+Wait for: `Server running on port 3000`
+
+---
+
+## Open in Browser
+
+Once all 3 terminals show "running":
+
+**http://localhost:5173/**
+
+---
+
+## To Stop
+
+Press **Ctrl+C** in each terminal
 
