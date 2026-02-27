@@ -66,7 +66,9 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
   const listRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Persist open state
   useEffect(() => {
@@ -212,19 +214,27 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
 
   async function sendMessage() {
     const text = input.trim();
+    const hasImage = Boolean(imageFile);
 
     // HARD guard (prevents double fire)
-    if (!text || busy || window.__skinaiChatLock) return;
+    if ((!text && !hasImage) || busy || window.__skinaiChatLock) return;
 
     window.__skinaiChatLock = true;
 
-    addMessage(text, "user");
+    if (text) {
+      addMessage(text, "user");
+    } else if (hasImage) {
+      addMessage("[Image attached]", "user");
+    }
     setInput("");
+    setImageFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
     setBusy(true);
 
     const formData = new FormData();
     formData.append("text", text);
     formData.append("page", "chat");
+    if (hasImage) formData.append("image", imageFile);
 
     // Exponential backoff retry for rate-limit errors
     const maxRetries = 3;
@@ -296,9 +306,20 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
 
   function onKeyDown(e) {
     if (e.key === "Enter" && !busy && !window.__skinaiChatLock) {
+      if (!input.trim() && !imageFile) return;
       e.preventDefault();
       sendMessage();
     }
+  }
+
+  function onPickImage(e) {
+    const file = e.target.files?.[0] || null;
+    if (file && !file.type.startsWith("image/")) {
+      setImageFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    setImageFile(file);
   }
 
   return (
@@ -341,6 +362,37 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
           </div>
 
           <div id="chatbot-input-area">
+            <button
+              id="chatbot-attach"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy}
+              aria-label="Attach image"
+              title="Attach image"
+            >
+              <svg
+                className="chatbot-attach-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  d="M7.5 12.5 16 4a3.5 3.5 0 0 1 5 5L11 19a5 5 0 1 1-7.1-7.1l9.4-9.4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <input
+              id="chatbot-file"
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={onPickImage}
+              hidden
+            />
             <input
               id="chatbot-input"
               type="text"
@@ -354,11 +406,26 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
               id="chatbot-send"
               type="button"
               onClick={sendMessage}
-              disabled={busy || !input.trim()}
+              disabled={busy || (!input.trim() && !imageFile)}
             >
               ➤
             </button>
           </div>
+          {imageFile && (
+            <div id="chatbot-attachment-row">
+              <span id="chatbot-attachment-name">{imageFile.name}</span>
+              <button
+                id="chatbot-attachment-remove"
+                type="button"
+                onClick={() => {
+                  setImageFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
