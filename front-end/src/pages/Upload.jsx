@@ -453,6 +453,10 @@ Object.entries(flags).forEach(([key, value]) => {
       const chatJson = await chatRes.json();
       const display = chatJson.display || {};
       const followUp = display.follow_up_question || chatJson.follow_up_question || "None";
+      const sections =
+        (Array.isArray(display.message_sections) && display.message_sections) ||
+        (Array.isArray(chatJson.message_sections) && chatJson.message_sections) ||
+        [];
       const replyBase =
         display.message ||
         chatJson.reply ||
@@ -463,13 +467,28 @@ Object.entries(flags).forEach(([key, value]) => {
       const reply = String(replyBase);
 setAiMsg(reply);
 
-window.dispatchEvent(
-  new CustomEvent("skinai:assistantMessage", {
-    detail: reply,
-    bubbles: true,
-    composed: true,
-  })
-);
+if (sections.length > 0) {
+  sections
+    .map((section) => String(section || "").trim())
+    .filter(Boolean)
+    .forEach((section) => {
+      window.dispatchEvent(
+        new CustomEvent("skinai:assistantMessage", {
+          detail: section,
+          bubbles: true,
+          composed: true,
+        })
+      );
+    });
+} else {
+  window.dispatchEvent(
+    new CustomEvent("skinai:assistantMessage", {
+      detail: reply,
+      bubbles: true,
+      composed: true,
+    })
+  );
+}
 
 // OPTIONAL: if you want, dispatch follow-up as a separate event/message
 if (followUp && followUp !== "None") {

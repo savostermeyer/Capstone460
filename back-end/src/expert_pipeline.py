@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 import json
 import os
+from expertSystem.cf_probability_integration import run_cf_disease_fusion
 
 
 # ----------------------------
@@ -265,6 +266,22 @@ def run_expert_pipeline(
     top_label = topk[0]["label"] if topk else None
     label_facts = medical_facts.get(top_label, {}) if top_label else {}
 
+    probability_fusion = run_cf_disease_fusion(
+        patient_inputs={
+            "bleeding": intake.get("bleeding"),
+            "rapid_change": intake.get("rapid_change"),
+            "width_mm": intake.get("width_mm") or intake.get("diameter_mm"),
+            "border_0_10": intake.get("border_0_10") or intake.get("border_irregularity"),
+            "num_colors": intake.get("num_colors") or intake.get("number_of_colors"),
+            "elevation": intake.get("elevation"),
+            "itching_0_10": intake.get("itching_0_10") or intake.get("itching"),
+            "pain_0_10": intake.get("pain_0_10") or intake.get("pain"),
+            "age": intake.get("age"),
+            "duration_days": intake.get("duration_days"),
+        },
+        model_topk=topk,
+    )
+
     explanation_seed = {
         "primary_result": primary,
         "triage": primary,
@@ -289,6 +306,7 @@ def run_expert_pipeline(
         "label_facts": label_facts,
         "facts": facts,
         "trace": trace,
+        "probability_fusion": probability_fusion,
         "disclaimer": "This tool does not provide a medical diagnosis. If you are concerned, consult a licensed clinician.",
     }
 
@@ -307,6 +325,7 @@ def run_expert_pipeline(
             "triggered_facts": triggered_facts,
         },
         "medical_facts": label_facts,
+        "probability_fusion": probability_fusion,
         "explanation_seed": explanation_seed,
     }
 

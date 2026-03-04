@@ -273,14 +273,27 @@ export default function ChatbotWidget({ title = "Talk to Skindarella" }) {
           data.text ||
           data.assistant ||
           "[No reply]";
+        const sections =
+          (Array.isArray(display.message_sections) && display.message_sections) ||
+          (Array.isArray(data.message_sections) && data.message_sections) ||
+          [];
         const followUp = display.follow_up_question || data.follow_up_question || "None";
 
-        const botText =
-          followUp && followUp !== "None"
-            ? `${String(message)}\n\nFollow-up: ${String(followUp)}`
-            : String(message);
-
-        addMessage(botText, "bot");
+        if (sections.length > 0) {
+          sections
+            .map((s) => String(s || "").trim())
+            .filter(Boolean)
+            .forEach((section) => addMessage(section, "bot"));
+          if (followUp && followUp !== "None") {
+            addMessage(`Follow-up: ${String(followUp)}`, "bot");
+          }
+        } else {
+          const botText =
+            followUp && followUp !== "None"
+              ? `${String(message)}\n\nFollow-up: ${String(followUp)}`
+              : String(message);
+          addMessage(botText, "bot");
+        }
         // Success, exit retry loop
         attempt = maxRetries;
       } catch (err) {

@@ -17,6 +17,7 @@ print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
 import google.generativeai as genai
 from expertSystem.clinical_risk import build_combined_risk_summary
 from expertSystem.medical_references_cache import format_references_section
+from expertSystem.cf_probability_integration import run_cf_disease_fusion
 
 
 # ---------------------------
@@ -873,56 +874,137 @@ def _extract_number(text: str) -> Optional[float]:
         return None
 
 
-def _parse_yes_no_strict(text: str) -> Optional[bool]:
+_NUMBER_WORDS: Dict[str, int] = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+
+
+def _normalize_free_text(text: str) -> str:
     low = str(text or "").strip().lower()
-    if re.search(r"\b(yes|y|yeah|yep|true)\b", low):
+    low = low.replace("–", "-")
+    low = low.replace("—", "-")
+    low = re.sub(r"[~≈]", " ", low)
+    low = re.sub(r"\babout\b|\baround\b|\bmaybe\b|\broughly\b|\bapproximately\b|\bkinda\b|\bkind of\b", " ", low)
+    low = re.sub(r"\bmillimeters?\b|\bmillimetres?\b|\bmm\b", " ", low)
+    low = re.sub(r"[^a-z0-9+/\.\-\s]", " ", low)
+    low = re.sub(r"\s+", " ", low).strip()
+    return low
+
+
+def _replace_number_words(text: str) -> str:
+    out = str(text or "")
+    for word, val in _NUMBER_WORDS.items():
+        out = re.sub(rf"\b{re.escape(word)}\b", str(val), out)
+    return out
+
+
+def _extract_numeric_value(text: str) -> Optional[float]:
+    cleaned = _replace_number_words(_normalize_free_text(text))
+
+    ratio = re.search(r"(-?\d+(?:\.\d+)?)\s*/\s*10\b", cleaned)
+    if ratio:
+        try:
+            return float(ratio.group(1))
+        except Exception:
+            pass
+
+    return _extract_number(cleaned)
+
+
+def _extract_integer_value(text: str) -> Optional[int]:
+    n = _extract_numeric_value(text)
+    if n is None:
+        return None
+    if float(n).is_integer():
+        return int(n)
+    return None
+
+
+def _parse_yes_no_strict(text: str) -> Optional[bool]:
+    low = _normalize_free_text(text)
+    if re.search(r"\b(yes|y|yeah|yep|true|sure|affirmative)\b", low):
         return True
-    if re.search(r"\b(no|n|nope|false)\b", low):
+    if re.search(r"\b(no|n|nope|false|negative)\b", low):
         return False
     return None
 
 
 def _parse_zero_to_ten(text: str) -> Dict[str, Any]:
-    low = str(text or "").strip().lower()
+    low = _normalize_free_text(text)
     if re.search(r"\b(yes|no|true|false|y|n)\b", low):
         return {"ok": False, "error": "Please enter a number 0–10."}
 
-    n = _extract_number(low)
+    n = _extract_numeric_value(low)
     if n is None:
         return {"ok": False, "error": "Please enter a number 0–10."}
-    if n < 0 or n > 10:
-        return {"ok": False, "error": "Please enter a number 0–10."}
-    return {"ok": True, "value": float(n)}
+    normalized = max(0.0, min(10.0, float(n)))
+    return {
+        "ok": True,
+        "value": normalized,
+        "normalized_text": str(normalized),
+    }
 
 
 def _parse_width_mm(text: str) -> Dict[str, Any]:
-    n = _extract_number(text)
+    n = _extract_numeric_value(text)
     if n is None or n <= 0:
         return {"ok": False, "error": "Please enter a positive width in mm (for example: 6)."}
-    return {"ok": True, "value": float(n)}
+    return {
+        "ok": True,
+        "value": float(n),
+        "normalized_text": f"{float(n):g} mm",
+    }
 
 
 def _parse_num_colors(text: str) -> Dict[str, Any]:
-    low = str(text or "").strip().lower()
+    low = _normalize_free_text(text)
     if "3+" in low:
         return {"ok": True, "value": 3}
+    if re.search(r"\bthree\s*\+\b", str(text or "").lower()):
+        return {"ok": True, "value": 3}
 
-    n = _extract_number(low)
+    n = _extract_integer_value(low)
     if n is None:
         return {"ok": False, "error": "Please enter an integer color count (1 or higher)."}
-    if float(n).is_integer() and int(n) >= 1:
-        return {"ok": True, "value": int(n)}
+    if int(n) >= 1:
+        return {
+            "ok": True,
+            "value": int(n),
+            "normalized_text": str(int(n)),
+        }
     return {"ok": False, "error": "Please enter an integer color count (1 or higher)."}
 
 
 def _parse_elevation(text: str) -> Dict[str, Any]:
-    low = str(text or "").strip().lower()
+    low = _normalize_free_text(text)
     synonyms = {
         "flat": "flat",
         "raised": "raised",
         "elevated": "raised",
         "bump": "raised",
         "bumpy": "raised",
+        "slightly raised": "raised",
+        "kind of raised": "raised",
         "nodule": "nodular",
         "nodular": "nodular",
         "lump": "nodular",
@@ -1124,30 +1206,89 @@ def _compute_result(answers: Dict[str, Any], state: ConvState) -> Dict[str, Any]
     clinical = combined.get("clinical", {}) or {}
     model = combined.get("model", {}) or {}
 
-    lines = [
-        "Result",
-        f"- Bleeding: {'yes' if answers.get('bleeding') else 'no'}",
-        f"- Itching (0-10): {float(answers.get('itching')):g}",
-        f"- Width (mm): {float(answers.get('width_mm')):g}",
-        f"- Border irregularity (0-10): {float(answers.get('border_irregularity')):g}",
-        f"- Number of colors: {int(answers.get('num_colors'))}",
-        f"- Elevation: {str(answers.get('elevation')).lower()}",
-        f"- Pain (0-10): {float(answers.get('pain')):g}",
-        f"- Clinical risk points: {int(clinical.get('points', 0) or 0)} ({clinical.get('level', 'low')})",
-        f"- Model risk: {model.get('level', 'low')} (score {float(model.get('score', 0.0) or 0.0):.2f})",
-        f"- Final risk (conservative): {final.get('level', 'low')}",
-        f"Recommended next step: {final.get('recommended_next_step', '')}",
-        "This is not a diagnosis; in-person clinician review is recommended for concerning changes.",
-        "",
-        format_references_section(),
-    ]
+    cf_fusion = run_cf_disease_fusion(
+        patient_inputs={
+            "bleeding": answers.get("bleeding"),
+            "rapid_change": rapid_change,
+            "width_mm": answers.get("width_mm"),
+            "border_irregularity": answers.get("border_irregularity"),
+            "num_colors": answers.get("num_colors"),
+            "elevation": answers.get("elevation"),
+            "itching": answers.get("itching"),
+            "pain": answers.get("pain"),
+            "age": (state.case_state or {}).get("age"),
+            "duration_days": (state.case_state or {}).get("duration_days"),
+        },
+        model_topk=model_topk,
+    )
+
+    top3 = cf_fusion.get("top3", [])
+    top_breakdown = cf_fusion.get("top_disease_breakdown", {})
+
+    intake_section = "\n".join(
+        [
+            "Intake summary",
+            f"- Bleeding: {'yes' if answers.get('bleeding') else 'no'}",
+            f"- Itching (0-10): {float(answers.get('itching')):g}",
+            f"- Width (mm): {float(answers.get('width_mm')):g}",
+            f"- Border irregularity (0-10): {float(answers.get('border_irregularity')):g}",
+            f"- Number of colors: {int(answers.get('num_colors'))}",
+            f"- Elevation: {str(answers.get('elevation')).lower()}",
+            f"- Pain (0-10): {float(answers.get('pain')):g}",
+        ]
+    )
+
+    prediction_section = "\n".join(
+        [
+            "Prediction summary",
+            f"- Clinical risk points: {int(clinical.get('points', 0) or 0)} ({clinical.get('level', 'low')})",
+            f"- Clinical probability: {float(clinical.get('probability_percent', 0.0) or 0.0):.1f}%",
+            f"- Model risk: {model.get('level', 'low')} (score {float(model.get('score', 0.0) or 0.0):.2f})",
+            f"- Final risk (conservative): {final.get('level', 'low')}",
+            f"- Top disease (%): {top_breakdown.get('label', 'unknown')} (model {float(top_breakdown.get('model_percent', 0.0) or 0.0):.2f}%, expert {float(top_breakdown.get('expert_percent', 0.0) or 0.0):.2f}%, final {float(top_breakdown.get('final_percent', 0.0) or 0.0):.2f}%)",
+            "- Top 3 final diseases: "
+            + (
+                ", ".join(
+                    f"{str(item.get('label', 'unknown'))} {float(item.get('final_percent', 0.0) or 0.0):.2f}%"
+                    for item in top3[:3]
+                )
+                if top3
+                else "Unavailable"
+            ),
+            "This is not a diagnosis; in-person clinician review is recommended for concerning changes.",
+        ]
+    )
+
+    references_and_steps_section = "\n".join(
+        [
+            f"Recommended next step: {final.get('recommended_next_step', '')}",
+            "",
+            format_references_section(),
+        ]
+    )
+
+    lines = [intake_section, prediction_section, references_and_steps_section]
     return {
         "risk": final.get("level", "low"),
         "message": "\n".join(lines),
+        "message_sections": [
+            intake_section,
+            prediction_section,
+            references_and_steps_section,
+        ],
         "summary": {
             "clinical_risk": clinical,
             "model_risk": model,
             "final_risk": final,
+            "probability_fusion": {
+                "inputs": cf_fusion.get("inputs", {}),
+                "model_probs": cf_fusion.get("model_probs", {}),
+                "expert_probs": cf_fusion.get("expert_probs", {}),
+                "final_probs": cf_fusion.get("final_probs", {}),
+                "top3": top3,
+                "reasoning": cf_fusion.get("reasoning", []),
+                "top_disease_breakdown": top_breakdown,
+            },
         },
     }
 
@@ -1244,5 +1385,6 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
         "case_state": case_context,
         "pending_slot": None,
         "risk_level": result_payload.get("risk"),
+        "message_sections": result_payload.get("message_sections", []),
         "result_summary": result_payload.get("summary", {}),
     }

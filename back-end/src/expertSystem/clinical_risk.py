@@ -1,8 +1,38 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+import math
 
 RISK_RANK = {"low": 1, "moderate": 2, "high": 3}
+
+
+def clinical_points_to_probability(points: int, use_logistic: bool = False) -> float:
+    """
+    Map clinical points to a probability in [0,1].
+
+    Default: tunable piecewise mapping
+      0-2 -> 0.05, 3-4 -> 0.15, 5-6 -> 0.35,
+      7-8 -> 0.55, 9-10 -> 0.70, 11+ -> 0.85
+
+    Optional logistic mode for smoother calibration.
+    """
+    p = max(0, int(points or 0))
+    if use_logistic:
+        # Centered around 7 points with moderate slope; clipped for stability.
+        prob = 1.0 / (1.0 + math.exp(-0.55 * (p - 7.0)))
+        return max(0.01, min(0.99, float(prob)))
+
+    if p <= 2:
+        return 0.05
+    if p <= 4:
+        return 0.15
+    if p <= 6:
+        return 0.35
+    if p <= 8:
+        return 0.55
+    if p <= 10:
+        return 0.70
+    return 0.85
 
 
 def _to_bool(value: Any) -> bool | None:
@@ -199,9 +229,13 @@ def compute_clinical_risk(answers: Dict[str, Any] | None, extras: Dict[str, Any]
     else:
         level = "low"
 
+    clinical_prob = clinical_points_to_probability(points)
+
     return {
         "points": points,
         "level": level,
+        "probability": round(clinical_prob, 4),
+        "probability_percent": round(clinical_prob * 100.0, 1),
         "facts": facts,
         "required_fields": list(required.keys()),
         "missing_required": missing_required,

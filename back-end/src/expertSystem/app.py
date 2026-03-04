@@ -92,6 +92,7 @@ from expertSystem.medical_references_cache import (  # noqa: E402
     get_cached_references,
     refresh_references,
 )
+from expertSystem.cf_probability_integration import run_cf_disease_fusion  # noqa: E402
 
 FRONT_DIR = os.path.join(ROOT, "front-end")
 DATA_DIR = os.path.join(ROOT, "data")
@@ -281,6 +282,7 @@ def _build_chat_display_payload(model_out: dict) -> dict:
 
     return {
         "message": message,
+        "message_sections": model_out.get("message_sections", []),
         "follow_up_question": follow_up_question,
         "fields_needed": fields_needed,
         "ready_for_assessment": ready_for_assessment,
@@ -482,6 +484,13 @@ def analyze_skin():
         risk_score = _risk_label_to_api(final_level)
         risk_level = final_level
         references_cache = get_cached_references()
+        cf_fusion = pipeline_result.get("probability_fusion") or run_cf_disease_fusion(
+            patient_inputs={
+                **clinical_inputs,
+                "rapid_change": symptom_flags.get("rapid_change"),
+            },
+            model_topk=topk,
+        )
 
         explanation_inputs = {
             "model_probs": topk,
@@ -521,6 +530,21 @@ def analyze_skin():
                 "risk": combined_risk.get("final", {}),
                 "recommended_next_step": combined_risk.get("final", {}).get("recommended_next_step"),
             },
+            "patient_inputs": cf_fusion.get("patient_inputs", {}),
+            "model_probabilities": cf_fusion.get("model_probabilities", {}),
+            "certainty_factor_scores": cf_fusion.get("certainty_factor_scores", {}),
+            "certainty_factor_probabilities": cf_fusion.get("certainty_factor_probabilities", {}),
+            "final_combined_probabilities": cf_fusion.get("final_combined_probabilities", {}),
+            "most_likely_disease": cf_fusion.get("most_likely_disease", {}),
+            "explanation_of_reasoning": cf_fusion.get("explanation_of_reasoning", {}),
+            "recommended_next_step": cf_fusion.get("recommended_next_step"),
+            "inputs": cf_fusion.get("inputs", {}),
+            "model_probs": cf_fusion.get("model_probs", {}),
+            "expert_probs": cf_fusion.get("expert_probs", {}),
+            "final_probs": cf_fusion.get("final_probs", {}),
+            "top3": cf_fusion.get("top3", []),
+            "reasoning": cf_fusion.get("reasoning", []),
+            "top_disease_breakdown": cf_fusion.get("top_disease_breakdown", {}),
             "medical_references": {
                 "updated_at": references_cache.get("updated_at"),
                 "snippets": references_cache.get("snippets", []),
@@ -941,6 +965,7 @@ def chat():
         response_payload["message"] = display["message"]
         response_payload["assistant"] = display["message"]
         response_payload["text"] = display["message"]
+        response_payload["message_sections"] = display.get("message_sections", [])
         response_payload["follow_up_question"] = display["follow_up_question"]
         response_payload["fields_needed"] = out.get("fields_needed", [])
         response_payload["ready_for_assessment"] = bool(out.get("ready_for_assessment", False))
