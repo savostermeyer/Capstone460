@@ -87,6 +87,11 @@ from pipeline_stages import (  # noqa: E402
     run_fusion_stage,
     run_evidence_lookup,
 )
+from expertSystem.clinical_risk import build_combined_risk_summary  # noqa: E402
+from expertSystem.medical_references_cache import (  # noqa: E402
+    get_cached_references,
+    refresh_references,
+)
 
 FRONT_DIR = os.path.join(ROOT, "front-end")
 DATA_DIR = os.path.join(ROOT, "data")
@@ -208,6 +213,15 @@ def _analysis_to_chat_message(pipeline_result: dict) -> str:
         "- Do not invent facts.\n"
         "- Provide a brief provisional impression only after enough answers are collected or if user asks for assessment."
     )
+
+
+def _risk_label_to_api(level: str) -> str:
+    low = str(level or "").strip().lower()
+    if low == "high":
+        return "high_risk"
+    if low == "moderate":
+        return "moderate_risk"
+    return "low_risk"
 
 
 def _parse_json_or_default(value: object, default: object) -> object:
@@ -371,6 +385,7 @@ def analyze_skin():
                 "lesion_location": pipeline_result.get("intake", {}).get("location")
                 or request.form.get("location"),
                 "duration_days": pipeline_result.get("intake", {}).get("duration_days"),
+                "family_history": request.form.get("familyHistory"),
                 "symptom_flags": {
                     "rapid_change": pipeline_result.get("intake", {}).get("rapid_change"),
                     "bleeding": pipeline_result.get("intake", {}).get("bleeding"),
@@ -389,6 +404,7 @@ def analyze_skin():
                 "lesion_location": pipeline_result.get("intake", {}).get("location")
                 or request.form.get("location"),
                 "duration_days": pipeline_result.get("intake", {}).get("duration_days"),
+                "family_history": request.form.get("familyHistory"),
                 "symptom_flags": {
                     "rapid_change": pipeline_result.get("intake", {}).get("rapid_change"),
                     "bleeding": pipeline_result.get("intake", {}).get("bleeding"),
@@ -441,6 +457,32 @@ def analyze_skin():
         triggered_facts = reasoning.get("triggered_facts", []) or []
         triggered_rules = reasoning.get("triggered_rules", []) or []
 
+        symptom_flags = pipeline_result.get("intake", {}) or {}
+        clinical_inputs = {
+            "bleeding": symptom_flags.get("bleeding"),
+            "rapid_change": symptom_flags.get("rapid_change"),
+            "width_mm": symptom_flags.get("width_mm") or symptom_flags.get("diameter_mm"),
+            "border_0_10": symptom_flags.get("border_0_10") or symptom_flags.get("border_irregularity"),
+            "num_colors": symptom_flags.get("num_colors") or symptom_flags.get("number_of_colors"),
+            "elevation": symptom_flags.get("elevation"),
+            "itching_0_10": symptom_flags.get("itching_0_10") or symptom_flags.get("itching"),
+            "pain_0_10": symptom_flags.get("pain_0_10") or symptom_flags.get("pain"),
+        }
+        combined_risk = build_combined_risk_summary(
+            answers=clinical_inputs,
+            model_topk=topk,
+            model_label_hint=risk_level,
+            extras={
+                "age": pipeline_result.get("intake", {}).get("age"),
+                "duration_days": pipeline_result.get("intake", {}).get("duration_days"),
+                "familyHistory": request.form.get("familyHistory"),
+            },
+        )
+        final_level = combined_risk.get("final", {}).get("level", "low")
+        risk_score = _risk_label_to_api(final_level)
+        risk_level = final_level
+        references_cache = get_cached_references()
+
         explanation_inputs = {
             "model_probs": topk,
             "intake": pipeline_result.get("intake", {}),
@@ -448,6 +490,9 @@ def analyze_skin():
             "trace": reasoning.get("trace", []),
             "triggered_rules": triggered_rules,
             "triggered_facts": triggered_facts,
+            "clinical_risk": combined_risk.get("clinical", {}),
+            "model_risk": combined_risk.get("model", {}),
+            "final_risk": combined_risk.get("final", {}),
             "constraints": {
                 "no_new_facts": True,
                 "clinical_style": True,
@@ -467,7 +512,20 @@ def analyze_skin():
 
             "top_predictions": top_predictions,
             "risk_score": risk_score,
+            "clinical_risk": combined_risk.get("clinical", {}),
+            "model_risk": combined_risk.get("model", {}),
+            "final_risk": combined_risk.get("final", {}),
             "explanation_summary": explanation_seed,
+            "result_summary": {
+                "facts": combined_risk.get("clinical", {}).get("facts", []),
+                "risk": combined_risk.get("final", {}),
+                "recommended_next_step": combined_risk.get("final", {}).get("recommended_next_step"),
+            },
+            "medical_references": {
+                "updated_at": references_cache.get("updated_at"),
+                "snippets": references_cache.get("snippets", []),
+                "note": "General trusted references only; no patient-specific web diagnosis.",
+            },
             "assistant_seed": "I have your analysis. I will ask one focused follow-up question to refine the risk assessment.",
             "follow_up_questions": [
                 "Has this lesion been changing in size or color?",
@@ -620,6 +678,35 @@ def evidence_lookup():
 
         traceback.print_exc()
         return jsonify(error=f"evidence_lookup failed: {str(e)}"), 500
+
+
+@app.post("/admin/references/refresh")
+def admin_refresh_references():
+    """
+    Refresh cached trusted medical-reference snippets.
+    Optional JSON body:
+      {"snippets": [{"source": "CDC", "title": "...", "url": "...", "snippet": "..."}]}
+    """
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        snippets = payload.get("snippets") if isinstance(payload, dict) else None
+        if snippets is not None and not isinstance(snippets, list):
+            return jsonify(error="snippets must be an array when provided"), 400
+
+        refreshed = refresh_references(snippets)
+        return jsonify(
+            {
+                "status": "ok",
+                "updated_at": refreshed.get("updated_at"),
+                "count": len(refreshed.get("snippets", [])),
+                "cache_file": refreshed.get("cache_file"),
+            }
+        )
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify(error=f"admin refresh failed: {str(e)}"), 500
 
 
 @app.get("/pipeline_contracts")
@@ -788,6 +875,7 @@ def chat():
                 "skin_type": metadata.get("skinType") or metadata.get("fitzpatrick"),
                 "lesion_location": metadata.get("location") or metadata.get("body_site"),
                 "duration_days": metadata.get("duration_days"),
+                "family_history": metadata.get("familyHistory") or metadata.get("family_melanoma_history"),
                 "current_triage": metadata.get("primary_result") or metadata.get("triage"),
                 "model_probabilities": _parse_json_or_default(metadata.get("model_topk"), []),
                 "expert_facts": _parse_json_or_default(metadata.get("facts"), {}),

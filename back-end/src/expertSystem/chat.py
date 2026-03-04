@@ -15,6 +15,8 @@ print("[dotenv] file:", find_dotenv(usecwd=True))
 print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
 
 import google.generativeai as genai
+from expertSystem.clinical_risk import build_combined_risk_summary
+from expertSystem.medical_references_cache import format_references_section
 
 
 # ---------------------------
@@ -1086,40 +1088,41 @@ def _sync_answers_to_legacy_slots(state: ConvState) -> None:
         state.slots["pain_0_10"] = float(answers["pain"])
 
 
-def _compute_result(answers: Dict[str, Any]) -> Dict[str, str]:
-    score = 0
-    if answers.get("bleeding") is True:
-        score += 2
-    if float(answers.get("itching", 0) or 0) >= 7:
-        score += 1
-    if float(answers.get("width_mm", 0) or 0) >= 10:
-        score += 3
-    elif float(answers.get("width_mm", 0) or 0) >= 6:
-        score += 2
-    if float(answers.get("border_irregularity", 0) or 0) >= 7:
-        score += 2
-    n_colors = int(answers.get("num_colors") or 1)
-    if n_colors >= 3:
-        score += 2
-    elif n_colors == 2:
-        score += 1
-    elev = str(answers.get("elevation") or "").lower()
-    if elev == "nodular":
-        score += 2
-    elif elev == "raised":
-        score += 1
-    if float(answers.get("pain", 0) or 0) >= 7:
-        score += 1
+def _compute_result(answers: Dict[str, Any], state: ConvState) -> Dict[str, Any]:
+    model_topk = []
+    try:
+        model_topk = list((state.case_state or {}).get("model_probabilities") or [])
+    except Exception:
+        model_topk = []
 
-    if score >= 7:
-        risk = "high"
-        next_step = "Recommended next step: urgent dermatology visit (ideally within 24–48 hours)."
-    elif score >= 4:
-        risk = "moderate"
-        next_step = "Recommended next step: book a dermatology appointment soon for in-person evaluation."
-    else:
-        risk = "low"
-        next_step = "Recommended next step: monitor closely and schedule a routine dermatology review if any change occurs."
+    symptom_flags = ((state.case_state or {}).get("symptom_flags") or {}) if isinstance(state.case_state, dict) else {}
+    rapid_change = symptom_flags.get("rapid_change")
+    if rapid_change is None:
+        rapid_change = state.slots.get("rapid_change")
+
+    combined = build_combined_risk_summary(
+        answers={
+            "bleeding": answers.get("bleeding"),
+            "rapid_change": rapid_change,
+            "width_mm": answers.get("width_mm"),
+            "border_0_10": answers.get("border_irregularity"),
+            "num_colors": answers.get("num_colors"),
+            "elevation": answers.get("elevation"),
+            "itching_0_10": answers.get("itching"),
+            "pain_0_10": answers.get("pain"),
+        },
+        model_topk=model_topk,
+        model_label_hint=(state.case_state or {}).get("current_triage"),
+        extras={
+            "age": (state.case_state or {}).get("age"),
+            "duration_days": (state.case_state or {}).get("duration_days"),
+            "familyHistory": (state.case_state or {}).get("family_history"),
+        },
+    )
+
+    final = combined.get("final", {}) or {}
+    clinical = combined.get("clinical", {}) or {}
+    model = combined.get("model", {}) or {}
 
     lines = [
         "Result",
@@ -1130,11 +1133,23 @@ def _compute_result(answers: Dict[str, Any]) -> Dict[str, str]:
         f"- Number of colors: {int(answers.get('num_colors'))}",
         f"- Elevation: {str(answers.get('elevation')).lower()}",
         f"- Pain (0-10): {float(answers.get('pain')):g}",
-        f"- Risk level: {risk}",
-        next_step,
+        f"- Clinical risk points: {int(clinical.get('points', 0) or 0)} ({clinical.get('level', 'low')})",
+        f"- Model risk: {model.get('level', 'low')} (score {float(model.get('score', 0.0) or 0.0):.2f})",
+        f"- Final risk (conservative): {final.get('level', 'low')}",
+        f"Recommended next step: {final.get('recommended_next_step', '')}",
         "This is not a diagnosis; in-person clinician review is recommended for concerning changes.",
+        "",
+        format_references_section(),
     ]
-    return {"risk": risk, "message": "\n".join(lines)}
+    return {
+        "risk": final.get("level", "low"),
+        "message": "\n".join(lines),
+        "summary": {
+            "clinical_risk": clinical,
+            "model_risk": model,
+            "final_risk": final,
+        },
+    }
 
 
 # ---------------------------
@@ -1209,7 +1224,7 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             "pending_slot": current_key,
         }
 
-    result_payload = _compute_result(state.answers)
+    result_payload = _compute_result(state.answers, state)
     reply_text = result_payload["message"]
     state.pending_slot = None
     if incoming_text:
@@ -1229,4 +1244,5 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
         "case_state": case_context,
         "pending_slot": None,
         "risk_level": result_payload.get("risk"),
+        "result_summary": result_payload.get("summary", {}),
     }

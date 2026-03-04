@@ -88,16 +88,20 @@ def load_medical_facts(facts_path: Optional[str]) -> Dict[str, Any]:
 # Normalization helpers
 # ----------------------------
 
-def _to_bool(v: Any) -> bool:
-    """Convert common incoming values to bool safely."""
+def _to_bool(v: Any) -> Optional[bool]:
+    """Convert common incoming values to bool safely, preserving unknown as None."""
     if isinstance(v, bool):
         return v
     if v is None:
-        return False
+        return None
     if isinstance(v, (int, float)):
         return bool(v)
     s = str(v).strip().lower()
-    return s in ("true", "1", "yes", "y", "on", "checked")
+    if s in ("true", "1", "yes", "y", "on", "checked"):
+        return True
+    if s in ("false", "0", "no", "n", "off", "unchecked"):
+        return False
+    return None
 
 
 def normalize_intake(upload_fields: Dict[str, Any], chat_flags: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -108,12 +112,12 @@ def normalize_intake(upload_fields: Dict[str, Any], chat_flags: Optional[Dict[st
     """
     chat_flags = chat_flags or {}
 
-    # Normalize symptom flags (defaults False)
+    # Normalize symptom flags (missing stays unknown/None)
     symptoms = {
-        "rapid_change": _to_bool(chat_flags.get("rapid_change", False)),
-        "bleeding": _to_bool(chat_flags.get("bleeding", False)),
-        "itching": _to_bool(chat_flags.get("itching", False)),
-        "pain": _to_bool(chat_flags.get("pain", False)),
+        "rapid_change": _to_bool(chat_flags.get("rapid_change")),
+        "bleeding": _to_bool(chat_flags.get("bleeding")),
+        "itching": _to_bool(chat_flags.get("itching")),
+        "pain": _to_bool(chat_flags.get("pain")),
     }
 
     # Keep upload fields as-is but ensure common keys exist
@@ -277,10 +281,10 @@ def run_expert_pipeline(
             "low_risk_flag": facts.get("low_risk_flag"),
         },
         "intake_signals": {
-            "rapid_change": intake.get("rapid_change", False),
-            "bleeding": intake.get("bleeding", False),
-            "itching": intake.get("itching", False),
-            "pain": intake.get("pain", False),
+            "rapid_change": intake.get("rapid_change"),
+            "bleeding": intake.get("bleeding"),
+            "itching": intake.get("itching"),
+            "pain": intake.get("pain"),
         },
         "label_facts": label_facts,
         "facts": facts,
