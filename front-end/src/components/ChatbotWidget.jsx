@@ -265,14 +265,22 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
           }
         }
 
-        const reply =
+        const display = data.display || {};
+        const message =
+          display.message ||
           data.reply ||
           data.message ||
           data.text ||
           data.assistant ||
           "[No reply]";
+        const followUp = display.follow_up_question || data.follow_up_question || "None";
 
-        addMessage(String(reply), "bot");
+        const botText =
+          followUp && followUp !== "None"
+            ? `${String(message)}\n\nFollow-up: ${String(followUp)}`
+            : String(message);
+
+        addMessage(botText, "bot");
         // Success, exit retry loop
         attempt = maxRetries;
       } catch (err) {

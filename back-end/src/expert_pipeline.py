@@ -236,11 +236,25 @@ def run_expert_pipeline(
     # reasoning is expected to include at least: primary_result, facts, trace
     facts = reasoning.get("facts", {}) or {}
     trace = reasoning.get("trace", []) or []
+    ranked_diseases = reasoning.get("ranked_diseases", []) or []
+    triage = reasoning.get("triage") or reasoning.get("primary_result")
+    risk_level = reasoning.get("risk_level")
+    review_flag = bool(reasoning.get("review_flag", False))
+    triggered_rules = reasoning.get("triggered_rules", []) or []
+    triggered_facts = reasoning.get("triggered_facts", []) or []
 
     # If analyzer doesn't set primary_result, compute it here
-    primary = reasoning.get("primary_result")
+    primary = triage
     if not primary:
         primary = choose_primary_result(facts, cfg.clinician_review_threshold)
+
+    if not risk_level:
+        if primary in {"clinician_review", "high_risk"}:
+            risk_level = "high"
+        elif primary == "moderate_risk":
+            risk_level = "moderate"
+        else:
+            risk_level = "low"
 
     # Optional: attach label-based facts (from top prediction)
     medical_facts = load_medical_facts(cfg.facts_path)
@@ -249,7 +263,13 @@ def run_expert_pipeline(
 
     explanation_seed = {
         "primary_result": primary,
+        "triage": primary,
+        "risk_level": risk_level,
+        "review_flag": review_flag,
         "top_prediction": topk[0] if topk else None,
+        "ranked_diseases": ranked_diseases,
+        "triggered_rules": triggered_rules,
+        "triggered_facts": triggered_facts,
         "key_indicators": {
             "needs_clinician_review": facts.get("needs_clinician_review"),
             "high_risk_flag": facts.get("high_risk_flag"),
@@ -263,6 +283,8 @@ def run_expert_pipeline(
             "pain": intake.get("pain", False),
         },
         "label_facts": label_facts,
+        "facts": facts,
+        "trace": trace,
         "disclaimer": "This tool does not provide a medical diagnosis. If you are concerned, consult a licensed clinician.",
     }
 
@@ -271,8 +293,14 @@ def run_expert_pipeline(
         "ml": {"topK": topk},
         "reasoning": {
             "primary_result": primary,
+            "triage": primary,
+            "risk_level": risk_level,
+            "review_flag": review_flag,
             "facts": facts,
             "trace": trace,
+            "ranked_diseases": ranked_diseases,
+            "triggered_rules": triggered_rules,
+            "triggered_facts": triggered_facts,
         },
         "medical_facts": label_facts,
         "explanation_seed": explanation_seed,

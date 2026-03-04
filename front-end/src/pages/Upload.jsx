@@ -112,8 +112,8 @@ export default function Upload() {
   });
   const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
 
-  // Persistent session id (shared with chatbot widget)
-  const sid = useMemo(() => {
+  // Shared SID helper (always read current value so Upload + Chat stay in sync)
+  function getCurrentSid() {
     try {
       let existing = localStorage.getItem("skinai_sid");
       if (!existing) {
@@ -124,7 +124,7 @@ export default function Upload() {
     } catch {
       return "sid_" + Math.random().toString(36).substring(2);
     }
-  }, []);
+  }
   const [formMsg, setFormMsg] = useState("");
   const [result, setResult] = useState(null); // demo result object
   const [userEmail, setUserEmail] = useState(getLoggedInUser);
@@ -292,16 +292,30 @@ export default function Upload() {
     try {
       // 1️⃣ Analyze images (Flask)
       const uploadPromises = files.map(async (file) => {
+        const sid = getCurrentSid();
         const formData = new FormData();
         formData.append("image", file);
         // include page so backend/chat won't KeyError
         formData.append("page", "upload");
 
-        // required by Flask
-        formData.append("rapid_change", "false");
-        formData.append("bleeding", "false");
-        formData.append("itching", "false");
-        formData.append("pain", "false");
+        // Convert selected checkboxes into symptom flags
+const symptomSet = new Set(
+  form.primarySymptoms.map((s) => s.toLowerCase())
+);
+
+const flags = {
+  rapid_change: symptomSet.has("rapid change"),
+  bleeding: symptomSet.has("bleeding"),
+  itching: symptomSet.has("itching"),
+  pain: symptomSet.has("pain"),
+};
+
+// Only send TRUE flags (omit false = unknown)
+Object.entries(flags).forEach(([key, value]) => {
+  if (value) {
+    formData.append(key, "true");
+  }
+});
 
         // intake fields
         formData.append("name", form.name);
@@ -410,6 +424,7 @@ export default function Upload() {
       // ensure chat endpoint has page value
       chatData.append("page", "upload");
 
+      
       chatData.append("name", form.name);
       chatData.append("age", String(form.age));
       chatData.append("sex", form.sex);
@@ -429,38 +444,43 @@ export default function Upload() {
       chatData.append("trace", JSON.stringify(normalized.trace ?? []));
 
       // Send the follow-up prompt to the chat endpoint using the same persistent SID
+      const sid = getCurrentSid();
       const chatRes = await fetch(`${API_BASE}/chat?sid=${encodeURIComponent(sid)}`, {
         method: "POST",
         body: chatData,
       });
 
       const chatJson = await chatRes.json();
-      const reply =
-        chatJson.reply || chatJson.message || chatJson.assistant || chatJson.text || "";
-      setAiMsg(String(reply));
+      const display = chatJson.display || {};
+      const followUp = display.follow_up_question || chatJson.follow_up_question || "None";
+      const replyBase =
+        display.message ||
+        chatJson.reply ||
+        chatJson.message ||
+        chatJson.assistant ||
+        chatJson.text ||
+        "";
+      const reply = String(replyBase);
+setAiMsg(reply);
 
-      // Dispatch assistant reply to chat widget and open it
-      try {
-        console.debug(
-          "[Upload] Dispatching Gemini reply to chatbot widget:",
-          reply.substring(0, 100)
-        );
-        const dispatched = window.dispatchEvent(
-          new CustomEvent("skinai:assistantMessage", {
-            detail: String(reply),
-            bubbles: true,
-            composed: true,
-          })
-        );
-        console.debug("[Upload] dispatchEvent returned:", dispatched);
-        // signal the chat to open
-        window.dispatchEvent(
-          new CustomEvent("skinai:open", { bubbles: true, composed: true })
-        );
-      } catch (e) {
-        console.warn("Could not dispatch assistant event", e);
-      }
-      setAiLoading(false);
+window.dispatchEvent(
+  new CustomEvent("skinai:assistantMessage", {
+    detail: reply,
+    bubbles: true,
+    composed: true,
+  })
+);
+
+// OPTIONAL: if you want, dispatch follow-up as a separate event/message
+if (followUp && followUp !== "None") {
+  window.dispatchEvent(
+    new CustomEvent("skinai:assistantMessage", {
+      detail: String(followUp),
+      bubbles: true,
+      composed: true,
+    })
+  );
+}
 
       // Save lastAnalysis to localStorage with timestamp & input metadata
       try {

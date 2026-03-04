@@ -25,6 +25,7 @@
 
 import os
 import sys
+import json
 from pathlib import Path
 from keras_predictor import KerasResNetPredictor
 from dotenv import load_dotenv
@@ -56,6 +57,7 @@ from collections import deque
 
 # hold per-session state in memory for dev; switch to a store later
 _SESS: Dict[str, ConvState] = {}
+_SESSION_CASE_STORE: Dict[str, dict] = {}
 _LAST_REQUEST: Dict[str, float] = {}
 # Keep recent request timestamps per session for sliding-window rate limiting
 _REQ_TIMES: Dict[str, deque] = {}
@@ -74,6 +76,17 @@ if SRC_DIR not in sys.path:
 # Import after sys.path is prepared
 from query import search  # noqa: E402
 from expert_pipeline import run_expert_pipeline  # noqa: E402
+from pipeline_stages import (  # noqa: E402
+    CONTRACT_VERSION,
+    MODEL_OUTPUT_SCHEMA,
+    EXPERT_OUTPUT_SCHEMA,
+    FUSED_OUTPUT_SCHEMA,
+    EVIDENCE_LOOKUP_SCHEMA,
+    run_model_stage,
+    run_expert_stage,
+    run_fusion_stage,
+    run_evidence_lookup,
+)
 
 FRONT_DIR = os.path.join(ROOT, "front-end")
 DATA_DIR = os.path.join(ROOT, "data")
@@ -85,6 +98,14 @@ app = Flask(__name__, static_folder=FRONT_DIR, static_url_path="")
 from flask_cors import CORS
 
 CORS(app)
+
+CHAT_DISCLAIMER = "This tool does not provide a medical diagnosis."
+CHAT_EXPOSE_INTERNAL = str(os.getenv("CHAT_EXPOSE_INTERNAL", "false")).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 # --- MongoDB client for reports storage (optional) ---
 mongo_client = None
@@ -161,24 +182,117 @@ def do_query():
 def _analysis_to_chat_message(pipeline_result: dict) -> str:
     seed = pipeline_result.get("explanation_seed", {}) or {}
     topk = pipeline_result.get("ml", {}).get("topK", []) or []
+    reasoning = pipeline_result.get("reasoning", {}) or {}
 
-    primary = (seed.get("primary_result") or "unknown").replace("_", " ")
+    primary = (seed.get("triage") or seed.get("primary_result") or "unknown").replace("_", " ")
+    risk_level = str(seed.get("risk_level") or "unknown")
     disclaimer = seed.get(
         "disclaimer",
         "This is not medical advice. This is a preliminary AI-assisted analysis."
     )
 
-    preds = ", ".join(
-        [f"{p['label']}: {p['prob']:.4f}" for p in topk]
-    )
+    preds = ", ".join([f"{p['label']}: {p['prob']:.4f}" for p in topk]) or "None"
+    triggered = reasoning.get("triggered_facts", []) or seed.get("triggered_facts", []) or []
+    triggered_txt = ", ".join(
+        f"{x.get('fact')} ({x.get('cf')})" for x in triggered[:6]
+    ) or "None"
 
     return (
-        f"{disclaimer}\n\n"
-        f"Preliminary result: {primary}\n"
-        f"Top predictions: {preds}\n\n"
-        "To improve accuracy, I have one quick question:\n"
-        "Where on the body is this located? (e.g., left forearm)"
+        f"{disclaimer}\n"
+        f"Current triage signal: {primary} (risk: {risk_level}).\n"
+        f"Model probabilities: {preds}.\n"
+        f"Triggered facts: {triggered_txt}.\n\n"
+        "Interview mode instructions:\n"
+        "- Ask exactly ONE focused follow-up question at a time.\n"
+        "- Keep responses short and clinical.\n"
+        "- Do not invent facts.\n"
+        "- Provide a brief provisional impression only after enough answers are collected or if user asks for assessment."
     )
+
+
+def _parse_json_or_default(value: object, default: object) -> object:
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except Exception:
+        return default
+
+
+def _build_chat_internal_payload(metadata: dict, model_out: dict) -> dict:
+    model_topk = _parse_json_or_default(metadata.get("model_topk"), [])
+    facts = _parse_json_or_default(metadata.get("facts"), {})
+
+    triggered_facts = []
+    if isinstance(facts, dict):
+        for key, value in facts.items():
+            try:
+                numeric = float(value)
+            except Exception:
+                continue
+            if abs(numeric) < 1e-9:
+                continue
+            triggered_facts.append(
+                {
+                    "fact": key,
+                    "cf": round(numeric, 4),
+                    "direction": "support" if numeric >= 0 else "oppose",
+                }
+            )
+
+    session_case_state = metadata.get("session_case_state") if isinstance(metadata, dict) else {}
+
+    return {
+        "triage": metadata.get("primary_result") or metadata.get("triage") or "unknown",
+        "model_probabilities": model_topk,
+        "triggered_facts": triggered_facts,
+        "pending_slot": model_out.get("pending_slot"),
+        "case_context": session_case_state or {},
+    }
+
+
+def _build_chat_display_payload(model_out: dict) -> dict:
+    message = str(
+        model_out.get("message")
+        or model_out.get("reply")
+        or model_out.get("assistant")
+        or model_out.get("text")
+        or ""
+    ).strip()
+    follow_up_question = str(model_out.get("follow_up_question") or "None").strip()
+    fields_needed = model_out.get("fields_needed", [])
+    ready_for_assessment = bool(model_out.get("ready_for_assessment", False))
+
+    return {
+        "message": message,
+        "follow_up_question": follow_up_question,
+        "fields_needed": fields_needed,
+        "ready_for_assessment": ready_for_assessment,
+        "disclaimer": CHAT_DISCLAIMER,
+    }
+
+
+def _merge_intake_into_session_store(sid: str, incoming: dict) -> dict:
+    current = dict(_SESSION_CASE_STORE.get(sid) or {})
+
+    for key, value in (incoming or {}).items():
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, dict) and isinstance(current.get(key), dict):
+            merged = dict(current.get(key) or {})
+            merged.update(value)
+            current[key] = merged
+        else:
+            current[key] = value
+
+    _SESSION_CASE_STORE[sid] = current
+    return current
+
+
+def _build_llm_case_state(sid: str) -> dict:
+    return dict(_SESSION_CASE_STORE.get(sid) or {})
 
 @app.post("/analyze_skin")
 def analyze_skin():
@@ -239,7 +353,56 @@ def analyze_skin():
         sid = request.args.get("sid") or request.form.get("sid") or "demo"
         st = _SESS.get(sid) or ConvState()
 
+        # Extract and structure intermediate values before persisting state
+        topk = pipeline_result["ml"]["topK"]
+        reasoning = pipeline_result["reasoning"]
+        triage = reasoning.get("triage", reasoning.get("primary_result", "unknown"))
+
         chat_message = _analysis_to_chat_message(pipeline_result)
+
+        # Persist structured case state so subsequent chat turns have full context.
+        st.case_state.update(
+            {
+                "age": pipeline_result.get("intake", {}).get("age"),
+                "skin_type": request.form.get("skinType"),
+                "lesion_location": pipeline_result.get("intake", {}).get("location")
+                or request.form.get("location"),
+                "duration_days": pipeline_result.get("intake", {}).get("duration_days"),
+                "symptom_flags": {
+                    "rapid_change": pipeline_result.get("intake", {}).get("rapid_change"),
+                    "bleeding": pipeline_result.get("intake", {}).get("bleeding"),
+                    "itching": pipeline_result.get("intake", {}).get("itching"),
+                    "pain": pipeline_result.get("intake", {}).get("pain"),
+                },
+                "model_probabilities": topk,
+                "current_triage": triage,
+            }
+        )
+        _merge_intake_into_session_store(
+            sid,
+            {
+                "age": pipeline_result.get("intake", {}).get("age"),
+                "skin_type": request.form.get("skinType"),
+                "lesion_location": pipeline_result.get("intake", {}).get("location")
+                or request.form.get("location"),
+                "duration_days": pipeline_result.get("intake", {}).get("duration_days"),
+                "symptom_flags": {
+                    "rapid_change": pipeline_result.get("intake", {}).get("rapid_change"),
+                    "bleeding": pipeline_result.get("intake", {}).get("bleeding"),
+                    "itching": pipeline_result.get("intake", {}).get("itching"),
+                    "pain": pipeline_result.get("intake", {}).get("pain"),
+                },
+                "model_probabilities": topk,
+                "current_triage": triage,
+                "expert_facts": reasoning.get("facts", {}),
+            },
+        )
+
+        # Also seed known slots from intake when present.
+        if pipeline_result.get("intake", {}).get("location"):
+            st.slots["body_site"] = pipeline_result.get("intake", {}).get("location")
+        if pipeline_result.get("intake", {}).get("age") is not None:
+            st.slots["patient_age"] = pipeline_result.get("intake", {}).get("age")
 
         st.history.append({
             "role": "model",
@@ -249,8 +412,6 @@ def analyze_skin():
         _SESS[sid] = st
 
         # Extract and structure the response
-        topk = pipeline_result["ml"]["topK"]
-        reasoning = pipeline_result["reasoning"]
         explanation_seed = pipeline_result["explanation_seed"]
 
         # Format top predictions with confidence scores
@@ -262,22 +423,54 @@ def analyze_skin():
         # Determine risk score
         risk_score = reasoning["primary_result"]
 
+        ranked_diseases = reasoning.get("ranked_diseases", []) or [
+            {
+                "label": pred["label"],
+                "model_prob": round(pred["prob"], 4),
+                "fused_cf": round(pred["prob"], 4),
+                "confidence": round(pred["prob"], 4),
+            }
+            for pred in topk
+        ]
+        triage = reasoning.get("triage", risk_score)
+        risk_level = reasoning.get("risk_level", "low")
+        review_flag = bool(reasoning.get("review_flag", triage in {"high_risk", "clinician_review"}))
+        triggered_facts = reasoning.get("triggered_facts", []) or []
+        triggered_rules = reasoning.get("triggered_rules", []) or []
+
+        explanation_inputs = {
+            "model_probs": topk,
+            "intake": pipeline_result.get("intake", {}),
+            "facts": reasoning.get("facts", {}),
+            "trace": reasoning.get("trace", []),
+            "triggered_rules": triggered_rules,
+            "triggered_facts": triggered_facts,
+            "constraints": {
+                "no_new_facts": True,
+                "clinical_style": True,
+                "single_follow_up_question": True,
+            },
+        }
+
         # Build response
         response = {
+            # New stable contract
+            "ranked_diseases": ranked_diseases,
+            "triage": triage,
+            "triggered_facts": triggered_facts,
+            "explanation_inputs": explanation_inputs,
+            "risk_level": risk_level,
+            "review_flag": review_flag,
+
             "top_predictions": top_predictions,
             "risk_score": risk_score,
             "explanation_summary": explanation_seed,
-            # include the assistant-friendly explanation text that was seeded into the session
-            "assistant_seed": chat_message,
+            "assistant_seed": "I have your analysis. I will ask one focused follow-up question to refine the risk assessment.",
             "follow_up_questions": [
                 "Has this lesion been changing in size or color?",
                 "Do you have a family history of skin cancer?",
                 "When did you first notice this lesion?",
             ],
-            "_debug": {
-                "reasoning_facts": reasoning["facts"],
-                "reasoning_trace": reasoning["trace"],
-            },
         }
 
         return jsonify(response)
@@ -287,6 +480,157 @@ def analyze_skin():
 
         traceback.print_exc()
         return jsonify(error=f"Analysis failed: {str(e)}"), 500
+
+
+@app.post("/predict_model")
+def predict_model():
+    """
+    Stage 1: CNN/image model output only.
+    Returns: { top_class, top_prob, top_k }
+    """
+    try:
+        if "image" not in request.files:
+            return jsonify(error="image file required (field name: 'image')"), 400
+        f = request.files["image"]
+        if not f.filename:
+            return jsonify(error="empty filename"), 400
+
+        image_bytes = f.read()
+        output = run_model_stage(KerasResNetPredictor(), image_bytes=image_bytes, k=3)
+        return jsonify(output)
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify(error=f"predict_model failed: {str(e)}"), 500
+
+
+@app.post("/predict_expert")
+def predict_expert():
+    """
+    Stage 2: Expert CF/rule engine using user answers only.
+    Returns: { expert_label, triage, explanation }
+    """
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        user_answers = payload.get("user_answers", payload)
+
+        if not isinstance(user_answers, dict):
+            return jsonify(error="user_answers must be an object"), 400
+
+        output = run_expert_stage(user_answers)
+        return jsonify(output)
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify(error=f"predict_expert failed: {str(e)}"), 500
+
+
+@app.post("/predict_fused")
+def predict_fused():
+    """
+    Stage 3: Fusion output.
+
+    Accepted payloads:
+    1) JSON with model_output + expert_output
+    2) multipart with image + optional user_answers (JSON string)
+    """
+    try:
+        model_output = None
+        expert_output = None
+
+        if request.is_json:
+            payload = request.get_json(force=True, silent=True) or {}
+            model_output = payload.get("model_output")
+            expert_output = payload.get("expert_output")
+
+            if model_output is None and "top_k" in payload:
+                model_output = {
+                    "contract_version": CONTRACT_VERSION,
+                    "top_class": payload.get("top_class", "unknown"),
+                    "top_prob": payload.get("top_prob", 0.0),
+                    "top_k": payload.get("top_k", []),
+                }
+
+            if expert_output is None and "triage" in payload:
+                expert_output = {
+                    "contract_version": CONTRACT_VERSION,
+                    "expert_label": payload.get("expert_label", "unknown"),
+                    "triage": payload.get("triage", "low_risk"),
+                    "explanation": payload.get("explanation", {}),
+                    "one_follow_up_question": payload.get("one_follow_up_question", "None"),
+                }
+        else:
+            if "image" in request.files and request.files["image"].filename:
+                image_bytes = request.files["image"].read()
+                model_output = run_model_stage(KerasResNetPredictor(), image_bytes=image_bytes, k=3)
+
+            raw_answers = request.form.get("user_answers")
+            user_answers = {}
+            if raw_answers:
+                try:
+                    user_answers = json.loads(raw_answers)
+                except Exception:
+                    return jsonify(error="user_answers must be valid JSON when sent as form-data"), 400
+
+            if user_answers:
+                expert_output = run_expert_stage(user_answers)
+
+        if model_output is None:
+            return jsonify(error="model_output is required (or provide image)") , 400
+        if expert_output is None:
+            return jsonify(error="expert_output is required (or provide user_answers)") , 400
+
+        fused = run_fusion_stage(model_output, expert_output)
+        return jsonify(
+            {
+                **fused,
+                "model_output": model_output,
+                "expert_output": expert_output,
+            }
+        )
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify(error=f"predict_fused failed: {str(e)}"), 500
+
+
+@app.post("/evidence_lookup")
+def evidence_lookup():
+    """
+    Optional stage: trusted evidence references lookup.
+    Prefers web search (if BRAVE_SEARCH_API_KEY is configured), otherwise
+    falls back to curated trusted references.
+    """
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        query = payload.get("query", "")
+        limit = payload.get("limit", 5)
+        use_web = bool(payload.get("use_web", True))
+
+        output = run_evidence_lookup(query=query, limit=limit, use_web=use_web)
+        return jsonify(output)
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify(error=f"evidence_lookup failed: {str(e)}"), 500
+
+
+@app.get("/pipeline_contracts")
+def pipeline_contracts():
+    """Expose stage contracts/schemas for frontend/backend integration."""
+    return jsonify(
+        {
+            "contract_version": CONTRACT_VERSION,
+            "predict_model": MODEL_OUTPUT_SCHEMA,
+            "predict_expert": EXPERT_OUTPUT_SCHEMA,
+            "predict_fused": FUSED_OUTPUT_SCHEMA,
+            "evidence_lookup": EVIDENCE_LOOKUP_SCHEMA,
+        }
+    )
 
 
 
@@ -433,6 +777,40 @@ def chat():
 
         # capture all other metadata from the intake form
         metadata = {k: v for k, v in request.form.items() if k not in ("text",)}
+
+        merged_case_state = _merge_intake_into_session_store(
+            sid,
+            {
+                "age": metadata.get("age") or metadata.get("patient_age"),
+                "skin_type": metadata.get("skinType") or metadata.get("fitzpatrick"),
+                "lesion_location": metadata.get("location") or metadata.get("body_site"),
+                "duration_days": metadata.get("duration_days"),
+                "current_triage": metadata.get("primary_result") or metadata.get("triage"),
+                "model_probabilities": _parse_json_or_default(metadata.get("model_topk"), []),
+                "expert_facts": _parse_json_or_default(metadata.get("facts"), {}),
+                "symptom_flags": {
+                    "rapid_change": metadata.get("rapid_change"),
+                    "bleeding": metadata.get("bleeding"),
+                    "itching": metadata.get("itching"),
+                    "pain": metadata.get("pain"),
+                },
+            },
+        )
+        metadata["session_case_state"] = _build_llm_case_state(sid)
+        st.case_state.update(merged_case_state)
+
+        case_ctx = metadata.get("session_case_state") or {}
+        print(
+            "[CHAT][CaseContext]",
+            {
+                "sid": sid,
+                "age": case_ctx.get("age"),
+                "lesion_location": case_ctx.get("lesion_location"),
+                "duration_days": case_ctx.get("duration_days"),
+                "current_triage": case_ctx.get("current_triage"),
+            },
+        )
+
         print("[CHAT] Session:", sid)
         print("[CHAT] Metadata received:", metadata)
         print("[CHAT] Text:", user_text)
@@ -463,19 +841,20 @@ def chat():
         _SESS[sid] = st
         print(f"[CHAT] History size after: {len(st.history)} messages")
 
-        # add absolute URLs for any image results
-        out["metadata"] = metadata
+        display = _build_chat_display_payload(out)
+        response_payload = {"display": display}
+        response_payload["internal"] = _build_chat_internal_payload(metadata, out)
 
-        # add absolute URLs for any image results
-        base = request.host_url.rstrip("/")
-        for r in out.get("results", []) or []:
-            image_id = r.get("image_id")
-            if image_id:  # guard in case field missing
-                rel = f"/ham/{image_id}.jpg"
-                r["url"] = rel
-                r["abs_url"] = f"{base}{rel}"
+        # Legacy compatibility fields (clean text only)
+        response_payload["reply"] = display["message"]
+        response_payload["message"] = display["message"]
+        response_payload["assistant"] = display["message"]
+        response_payload["text"] = display["message"]
+        response_payload["follow_up_question"] = display["follow_up_question"]
+        response_payload["fields_needed"] = out.get("fields_needed", [])
+        response_payload["ready_for_assessment"] = bool(out.get("ready_for_assessment", False))
 
-        return jsonify(out)
+        return jsonify(response_payload)
 
     except Exception as e:
         # Log full traceback to console for debugging
@@ -485,7 +864,22 @@ def chat():
         msg = f"Server error: {e}"
         # Keep 200 so the frontend can render the message in the chat bubble
         return (
-            jsonify({"reply": msg, "message": msg, "assistant": msg, "text": msg}),
+            jsonify(
+                {
+                    "display": {
+                        "message": msg,
+                        "follow_up_question": "None",
+                        "fields_needed": [],
+                        "ready_for_assessment": False,
+                        "disclaimer": CHAT_DISCLAIMER,
+                    },
+                    "internal": {},
+                    "reply": msg,
+                    "message": msg,
+                    "assistant": msg,
+                    "text": msg,
+                }
+            ),
             200,
         )
 
@@ -500,6 +894,9 @@ def chat_reset():
         if sid and sid in _SESS:
             old_size = len(_SESS[sid].history)
             _SESS[sid] = ConvState()
+            _SESSION_CASE_STORE.pop(sid, None)
+            _LAST_REQUEST.pop(sid, None)
+            _REQ_TIMES.pop(sid, None)
             print(f"[CHAT] Reset session {sid} (cleared {old_size} messages)")
             return jsonify({"message": "Chat session reset", "sid": sid})
         else:

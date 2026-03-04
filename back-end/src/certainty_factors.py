@@ -109,6 +109,49 @@ def cf_combine(cf1: float, cf2: float) -> float:
     return clamp_cf(result)
 
 
+def combine_cf(cfs: list[float], initial: float = 0.0) -> float:
+    """
+    Deterministically combine a sequence of CF values.
+
+    This is the preferred MYCIN-style fold used when multiple evidence sources
+    support/oppose the same conclusion.
+
+    Args:
+        cfs: Sequence of CF values to combine in the provided order.
+        initial: Starting CF value for the fold.
+
+    Returns:
+        A single combined CF in [-1, 1].
+    """
+    out = clamp_cf(initial)
+    for cf in cfs:
+        out = cf_combine(out, clamp_cf(cf))
+    return out
+
+
+def normalize_probability_to_cf(prob: float, neutral_prob: float = 0.5) -> float:
+    """
+    Convert a probability into signed CF evidence around a neutral baseline.
+
+    - prob == neutral_prob -> 0.0 (no net support)
+    - prob > neutral_prob  -> positive support
+    - prob < neutral_prob  -> negative support
+
+    Args:
+        prob: Probability in [0, 1].
+        neutral_prob: Baseline where evidence is considered neutral.
+
+    Returns:
+        Signed certainty factor in [-1, 1].
+    """
+    p = max(0.0, min(1.0, float(prob)))
+    n = max(1e-6, min(1.0 - 1e-6, float(neutral_prob)))
+
+    if p >= n:
+        return clamp_cf((p - n) / (1.0 - n))
+    return clamp_cf(-((n - p) / n))
+
+
 @dataclass
 class Rule:
     """
@@ -126,11 +169,14 @@ class Rule:
     operator: str
     rule_cf: float
     conclusion: str
+    description: str = ""
+    domain: str = "general"
 
 
 def evaluate_rules(
     evidence: dict[str, float],
-    rules: list[Rule]
+    rules: list[Rule],
+    include_skipped: bool = False,
 ) -> tuple[dict[str, float], list[dict]]:
     """
     Evaluate a set of rules against evidence using MYCIN CF reasoning.
@@ -145,13 +191,13 @@ def evaluate_rules(
         evidence: Dictionary of initial fact CFs (clamped to [-1, 1]).
         rules: List of Rule objects to evaluate.
     
-    Returns:
+        Returns:
         A tuple of (final_facts, trace) where:
         - final_facts: Dict of all facts and their final CFs.
         - trace: List of rule evaluation records, each containing:
-          - rule_id, operator, premises, premise_cfs, premise_cf,
-            rule_cf, conclusion, contrib_cf, previous_conclusion_cf,
-            new_conclusion_cf.
+                    - status, rule_id, operator, premises, premise_cfs, premise_cf,
+                        rule_cf, conclusion, contrib_cf, previous_conclusion_cf,
+                        new_conclusion_cf, description, domain.
     
     Raises:
         ValueError: If any rule has an invalid operator or rule_cf.
@@ -168,7 +214,25 @@ def evaluate_rules(
             raise ValueError(f"Rule {rule.id} has invalid rule_cf: {rule.rule_cf}")
         
         # Check if all premises are available
-        if not all(premise in facts for premise in rule.premises):
+        missing_premises = [premise for premise in rule.premises if premise not in facts]
+        if missing_premises:
+            if include_skipped:
+                trace.append({
+                    "status": "skipped_missing_premises",
+                    "rule_id": rule.id,
+                    "operator": rule.operator,
+                    "premises": rule.premises,
+                    "missing_premises": missing_premises,
+                    "premise_cfs": [],
+                    "premise_cf": None,
+                    "rule_cf": rule.rule_cf,
+                    "conclusion": rule.conclusion,
+                    "contrib_cf": 0.0,
+                    "previous_conclusion_cf": facts.get(rule.conclusion),
+                    "new_conclusion_cf": facts.get(rule.conclusion),
+                    "description": rule.description,
+                    "domain": rule.domain,
+                })
             continue
         
         # Gather premise CFs
@@ -194,6 +258,7 @@ def evaluate_rules(
         
         # Record trace
         trace_entry = {
+            "status": "applied",
             "rule_id": rule.id,
             "operator": rule.operator,
             "premises": rule.premises,
@@ -204,35 +269,45 @@ def evaluate_rules(
             "contrib_cf": contrib_cf,
             "previous_conclusion_cf": previous_conclusion_cf,
             "new_conclusion_cf": new_conclusion_cf,
+            "description": rule.description,
+            "domain": rule.domain,
         }
         trace.append(trace_entry)
     
     return facts, trace
 
 
-def build_evidence_from_model(topk: list[dict]) -> dict[str, float]:
+def build_evidence_from_model(
+    topk: list[dict],
+    neutral_prob: float = 1 / 7,
+    include_negative: bool = False,
+) -> dict[str, float]:
     """
     Build CF evidence from model predictions.
     
     Converts model output (list of label/probability pairs) into CF facts.
-    Clamps probabilities to [0, 1], then treats as positive CF values in [-1, 1].
+    Probabilities are normalized into signed CF values around a neutral baseline,
+    then optionally clipped to non-negative support-only evidence.
     
     Args:
         topk: List of dicts with "label" and "prob" keys.
               Example: [{"label": "mel", "prob": 0.62}, ...]
     
     Returns:
-        Dict of CF facts like {"img_mel": 0.62, "img_nv": 0.27, ...}
+        Dict of CF facts like {"img_mel": 0.56, "img_nv": 0.15, ...}
     """
     evidence = {}
     for item in topk:
         label = item.get("label", "").strip()
         prob = item.get("prob", 0.0)
-        # Clamp to [0, 1]
+        # Clamp to [0, 1] then normalize to signed CF
         prob = max(0.0, min(1.0, prob))
+        cf = normalize_probability_to_cf(prob, neutral_prob=neutral_prob)
+        if (not include_negative) and cf < 0.0:
+            cf = 0.0
         # Create fact with "img_" prefix
         fact_name = f"img_{label}"
-        evidence[fact_name] = clamp_cf(prob)
+        evidence[fact_name] = clamp_cf(cf)
     return evidence
 
 
@@ -240,32 +315,44 @@ def build_evidence_from_intake(intake: dict) -> dict[str, float]:
     """
     Build CF evidence from user intake form responses.
     
-    Maps user answers (True/False) to CF values:
-    - rapid_change=True -> 0.7
-    - bleeding=True -> 0.6
-    - itching=True -> 0.3
-    - pain=True -> 0.4
-    - Missing or False -> 0.0
+    Maps user answers (True/False) to CF values and allows weak opposing evidence
+    for explicitly negative answers to handle conflicts.
     
     Args:
         intake: Dict of user answers, e.g., {"rapid_change": True, "bleeding": False, ...}
     
     Returns:
-        Dict of CF facts like {"rapid_change": 0.7, "bleeding": 0.0, ...}
+        Dict of CF facts like {"rapid_change": 0.7, "bleeding": -0.25, ...}
     """
-    # Define CF mappings for each symptom
+    # Define (support_cf, oppose_cf) mappings for each symptom
     symptom_cf_map = {
-        "rapid_change": 0.7,
-        "bleeding": 0.6,
-        "itching": 0.3,
-        "pain": 0.4,
+        "rapid_change": (0.7, -0.3),
+        "bleeding": (0.6, -0.25),
+        "itching": (0.3, -0.1),
+        "pain": (0.4, -0.15),
     }
+
+    def _to_bool(v: object) -> Optional[bool]:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return bool(v)
+        s = str(v).strip().lower()
+        if s in {"true", "1", "yes", "y", "on", "checked"}:
+            return True
+        if s in {"false", "0", "no", "n", "off", "unchecked"}:
+            return False
+        return None
     
     evidence = {}
-    for symptom, cf_value in symptom_cf_map.items():
-        # Use 0.0 if missing or False, otherwise use the mapped CF value
-        if intake.get(symptom, False):
-            evidence[symptom] = cf_value
+    for symptom, (support_cf, oppose_cf) in symptom_cf_map.items():
+        parsed = _to_bool(intake.get(symptom))
+        if parsed is True:
+            evidence[symptom] = support_cf
+        elif parsed is False:
+            evidence[symptom] = oppose_cf
         else:
             evidence[symptom] = 0.0
     
@@ -299,21 +386,27 @@ def get_skinai_rules() -> list[Rule]:
             premises=["img_mel", "rapid_change"],
             operator="AND",
             rule_cf=0.85,
-            conclusion="high_risk_flag"
+            conclusion="high_risk_flag",
+            description="Melanoma-like image with rapid evolution raises high-risk concern.",
+            domain="high_risk",
         ),
         Rule(
             id="R_MEL_BLEED",
             premises=["img_mel", "bleeding"],
             operator="AND",
             rule_cf=0.9,
-            conclusion="high_risk_flag"
+            conclusion="high_risk_flag",
+            description="Melanoma-like image with bleeding strongly supports high-risk flag.",
+            domain="high_risk",
         ),
         Rule(
             id="R_MEL_ALONE",
             premises=["img_mel"],
             operator="AND",
             rule_cf=0.75,
-            conclusion="high_risk_flag"
+            conclusion="high_risk_flag",
+            description="Melanoma-like image alone contributes to high-risk flag.",
+            domain="high_risk",
         ),
         
         # Moderate-risk rules
@@ -322,35 +415,45 @@ def get_skinai_rules() -> list[Rule]:
             premises=["img_bcc", "img_akiec"],
             operator="OR",
             rule_cf=0.65,
-            conclusion="moderate_risk_flag"
+            conclusion="moderate_risk_flag",
+            description="BCC or AKIEC-like image contributes moderate-risk signal.",
+            domain="moderate_risk",
         ),
         Rule(
             id="R_BCC_ALONE",
             premises=["img_bcc"],
             operator="AND",
             rule_cf=0.6,
-            conclusion="moderate_risk_flag"
+            conclusion="moderate_risk_flag",
+            description="BCC-like image supports moderate-risk flag.",
+            domain="moderate_risk",
         ),
         Rule(
             id="R_AKIEC_ALONE",
             premises=["img_akiec"],
             operator="AND",
             rule_cf=0.58,
-            conclusion="moderate_risk_flag"
+            conclusion="moderate_risk_flag",
+            description="AKIEC-like image supports moderate-risk flag.",
+            domain="moderate_risk",
         ),
         Rule(
             id="R_NV_RAPID",
             premises=["img_nv", "rapid_change"],
             operator="AND",
             rule_cf=0.55,
-            conclusion="moderate_risk_flag"
+            conclusion="moderate_risk_flag",
+            description="Nevus-like image with rapid change elevates to moderate-risk.",
+            domain="moderate_risk",
         ),
         Rule(
             id="R_NV_BLEED",
             premises=["img_nv", "bleeding"],
             operator="AND",
             rule_cf=0.65,
-            conclusion="moderate_risk_flag"
+            conclusion="moderate_risk_flag",
+            description="Nevus-like image with bleeding elevates to moderate-risk.",
+            domain="moderate_risk",
         ),
         
         # Low-risk rules
@@ -359,28 +462,36 @@ def get_skinai_rules() -> list[Rule]:
             premises=["img_nv"],
             operator="AND",
             rule_cf=0.6,
-            conclusion="low_risk_flag"
+            conclusion="low_risk_flag",
+            description="Nevus-like image supports low-risk flag.",
+            domain="low_risk",
         ),
         Rule(
             id="R_BKL_ALONE",
             premises=["img_bkl"],
             operator="AND",
             rule_cf=0.65,
-            conclusion="low_risk_flag"
+            conclusion="low_risk_flag",
+            description="BKL-like image supports low-risk flag.",
+            domain="low_risk",
         ),
         Rule(
             id="R_VASC_ALONE",
             premises=["img_vasc"],
             operator="AND",
             rule_cf=0.7,
-            conclusion="low_risk_flag"
+            conclusion="low_risk_flag",
+            description="Vascular-lesion-like image supports low-risk flag.",
+            domain="low_risk",
         ),
         Rule(
             id="R_DF_ALONE",
             premises=["img_df"],
             operator="AND",
             rule_cf=0.75,
-            conclusion="low_risk_flag"
+            conclusion="low_risk_flag",
+            description="Dermatofibroma-like image supports low-risk flag.",
+            domain="low_risk",
         ),
         
         # Clinical review trigger
@@ -389,7 +500,9 @@ def get_skinai_rules() -> list[Rule]:
             premises=["high_risk_flag", "moderate_risk_flag"],
             operator="OR",
             rule_cf=0.75,
-            conclusion="needs_clinician_review"
+            conclusion="needs_clinician_review",
+            description="Any high/moderate risk evidence can trigger clinician review.",
+            domain="triage",
         ),
     ]
 

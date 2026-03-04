@@ -6,11 +6,148 @@ and clinician review recommendations.
 """
 
 from certainty_factors import (
+    Rule,
+    combine_cf,
     build_evidence_from_model,
     build_evidence_from_intake,
     get_skinai_rules,
     evaluate_rules,
 )
+
+
+def _canonical_risk_level(triage: str) -> str:
+    t = (triage or "").lower()
+    if t in {"high_risk", "clinician_review"}:
+        return "high"
+    if t == "moderate_risk":
+        return "moderate"
+    return "low"
+
+
+def _triage_from_facts(final_facts: dict) -> str:
+    needs_review_cf = float(final_facts.get("needs_clinician_review", 0.0) or 0.0)
+    high_risk_cf = float(final_facts.get("high_risk_flag", 0.0) or 0.0)
+    moderate_risk_cf = float(final_facts.get("moderate_risk_flag", 0.0) or 0.0)
+    low_risk_cf = float(final_facts.get("low_risk_flag", 0.0) or 0.0)
+
+    if needs_review_cf > 0.5:
+        return "clinician_review"
+    if high_risk_cf > max(moderate_risk_cf, low_risk_cf):
+        return "high_risk"
+    if moderate_risk_cf > low_risk_cf:
+        return "moderate_risk"
+    return "low_risk"
+
+
+def _derive_triggered_facts(final_facts: dict, trace: list[dict]) -> list[dict]:
+    triggered = []
+    seen = set()
+    for entry in trace:
+        if entry.get("status") != "applied":
+            continue
+        for premise in entry.get("premises", []):
+            cf = float(final_facts.get(premise, 0.0) or 0.0)
+            if abs(cf) < 1e-9:
+                continue
+            if premise in seen:
+                continue
+            seen.add(premise)
+            triggered.append(
+                {
+                    "fact": premise,
+                    "cf": round(cf, 4),
+                    "direction": "support" if cf >= 0 else "oppose",
+                }
+            )
+    return triggered
+
+
+def fuse_predictions(
+    model_probs: list[dict],
+    intake_facts: dict,
+    rules: list[Rule],
+) -> dict:
+    """
+    Deterministically fuse model probabilities, intake evidence, and CF rules.
+
+    Args:
+        model_probs: List of {label, prob} from the CNN.
+        intake_facts: Intake fields/symptoms from form/chat.
+        rules: Rule set used for CF reasoning.
+
+    Returns:
+        Dict with ranked diseases, triage, triggered rules/facts, risk level, and
+        review flag plus full reasoning internals for auditing.
+    """
+    model_evidence = build_evidence_from_model(model_probs)
+    intake_evidence = build_evidence_from_intake(intake_facts)
+    evidence = {**model_evidence, **intake_evidence}
+
+    final_facts, trace = evaluate_rules(evidence, rules, include_skipped=False)
+
+    ranked_diseases = []
+    for item in model_probs or []:
+        label = str(item.get("label", "")).strip()
+        if not label:
+            continue
+
+        prob = float(item.get("prob", 0.0) or 0.0)
+        img_cf = float(final_facts.get(f"img_{label}", 0.0) or 0.0)
+
+        if label == "mel":
+            risk_cf = float(final_facts.get("high_risk_flag", 0.0) or 0.0)
+        elif label in {"bcc", "akiec"}:
+            risk_cf = float(final_facts.get("moderate_risk_flag", 0.0) or 0.0)
+        else:
+            low_cf = float(final_facts.get("low_risk_flag", 0.0) or 0.0)
+            risk_cf = -abs(low_cf)
+
+        fused_cf = combine_cf([img_cf, 0.5 * risk_cf])
+        fused_score = max(0.0, min(1.0, (fused_cf + 1.0) / 2.0))
+        confidence = max(0.0, min(1.0, 0.65 * prob + 0.35 * fused_score))
+
+        ranked_diseases.append(
+            {
+                "label": label,
+                "model_prob": round(prob, 4),
+                "fused_cf": round(fused_cf, 4),
+                "confidence": round(confidence, 4),
+            }
+        )
+
+    ranked_diseases.sort(key=lambda x: (-x["confidence"], x["label"]))
+
+    triage = _triage_from_facts(final_facts)
+    risk_level = _canonical_risk_level(triage)
+    review_flag = triage in {"clinician_review", "high_risk"}
+
+    triggered_rules = []
+    for entry in trace:
+        contrib = float(entry.get("contrib_cf", 0.0) or 0.0)
+        if abs(contrib) < 1e-9:
+            continue
+        triggered_rules.append(
+            {
+                "rule_id": entry.get("rule_id"),
+                "conclusion": entry.get("conclusion"),
+                "contrib_cf": round(contrib, 4),
+                "premise_cf": round(float(entry.get("premise_cf", 0.0) or 0.0), 4),
+                "description": entry.get("description", ""),
+                "domain": entry.get("domain", "general"),
+            }
+        )
+
+    return {
+        "ranked_diseases": ranked_diseases,
+        "triage": triage,
+        "risk_level": risk_level,
+        "review_flag": review_flag,
+        "triggered_rules": triggered_rules,
+        "triggered_facts": _derive_triggered_facts(final_facts, trace),
+        "evidence": evidence,
+        "facts": final_facts,
+        "trace": trace,
+    }
 
 
 def analyze_skin_lesion(topk: list[dict], intake: dict) -> dict:
@@ -32,33 +169,18 @@ def analyze_skin_lesion(topk: list[dict], intake: dict) -> dict:
         - facts: Dict of all derived certainty factors
         - trace: List of rule evaluation steps
     """
-    # Build evidence from model and intake
-    model_evidence = build_evidence_from_model(topk)
-    intake_evidence = build_evidence_from_intake(intake)
-    evidence = {**model_evidence, **intake_evidence}
-    
-    # Evaluate rules
-    final_facts, trace = evaluate_rules(evidence, get_skinai_rules())
-    
-    # Determine primary result based on CF thresholds
-    needs_review_cf = final_facts.get("needs_clinician_review", 0.0)
-    high_risk_cf = final_facts.get("high_risk_flag", 0.0)
-    moderate_risk_cf = final_facts.get("moderate_risk_flag", 0.0)
-    low_risk_cf = final_facts.get("low_risk_flag", 0.0)
-    
-    if needs_review_cf > 0.5:
-        primary_result = "clinician_review"
-    elif high_risk_cf > moderate_risk_cf:
-        primary_result = "high_risk"
-    elif moderate_risk_cf > low_risk_cf:
-        primary_result = "moderate_risk"
-    else:
-        primary_result = "low_risk"
-    
+    fused = fuse_predictions(topk, intake, get_skinai_rules())
+
     return {
-        "primary_result": primary_result,
-        "facts": final_facts,
-        "trace": trace,
+        "primary_result": fused["triage"],
+        "facts": fused["facts"],
+        "trace": fused["trace"],
+        "ranked_diseases": fused["ranked_diseases"],
+        "triage": fused["triage"],
+        "risk_level": fused["risk_level"],
+        "review_flag": fused["review_flag"],
+        "triggered_rules": fused["triggered_rules"],
+        "triggered_facts": fused["triggered_facts"],
     }
 
 
