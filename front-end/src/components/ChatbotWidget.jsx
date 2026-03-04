@@ -12,7 +12,7 @@ function newSid() {
 if (!window.__skinaiChatLock) {
   window.__skinaiChatLock = false;
 }
-export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
+export default function ChatbotWidget({ title = "Talk to Skindarella" }) {
   // SID (persisted)
   const sid = useMemo(() => {
     try {

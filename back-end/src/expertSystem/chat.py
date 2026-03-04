@@ -348,6 +348,7 @@ class ConvState:
 
     # structured memory so we don't repeat questions forever
     slots: Dict[str, Any] = field(default_factory=dict)
+    answers: Dict[str, Any] = field(default_factory=dict)
     pending_slot: Optional[str] = None
     case_state: Dict[str, Any] = field(default_factory=dict)
 
@@ -849,23 +850,299 @@ def _format_tool_reply(payload: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+QUESTION_FLOW: List[Dict[str, str]] = [
+    {"key": "bleeding", "prompt": "Has the lesion bled? (yes/no)"},
+    {"key": "itching", "prompt": "How itchy is it on a 0–10 scale?"},
+    {"key": "width_mm", "prompt": "What is the lesion width at the largest point (in mm)?"},
+    {"key": "border_irregularity", "prompt": "How irregular are the borders on a 0–10 scale?"},
+    {"key": "num_colors", "prompt": "How many colors do you see? (integer, e.g., 1, 2, 3)"},
+    {"key": "elevation", "prompt": "What is the elevation? (flat/raised/nodular)"},
+    {"key": "pain", "prompt": "How painful is it on a 0–10 scale?"},
+]
+
+
+def _extract_number(text: str) -> Optional[float]:
+    m = re.search(r"-?\d+(?:\.\d+)?", str(text or ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except Exception:
+        return None
+
+
+def _parse_yes_no_strict(text: str) -> Optional[bool]:
+    low = str(text or "").strip().lower()
+    if re.search(r"\b(yes|y|yeah|yep|true)\b", low):
+        return True
+    if re.search(r"\b(no|n|nope|false)\b", low):
+        return False
+    return None
+
+
+def _parse_zero_to_ten(text: str) -> Dict[str, Any]:
+    low = str(text or "").strip().lower()
+    if re.search(r"\b(yes|no|true|false|y|n)\b", low):
+        return {"ok": False, "error": "Please enter a number 0–10."}
+
+    n = _extract_number(low)
+    if n is None:
+        return {"ok": False, "error": "Please enter a number 0–10."}
+    if n < 0 or n > 10:
+        return {"ok": False, "error": "Please enter a number 0–10."}
+    return {"ok": True, "value": float(n)}
+
+
+def _parse_width_mm(text: str) -> Dict[str, Any]:
+    n = _extract_number(text)
+    if n is None or n <= 0:
+        return {"ok": False, "error": "Please enter a positive width in mm (for example: 6)."}
+    return {"ok": True, "value": float(n)}
+
+
+def _parse_num_colors(text: str) -> Dict[str, Any]:
+    low = str(text or "").strip().lower()
+    if "3+" in low:
+        return {"ok": True, "value": 3}
+
+    n = _extract_number(low)
+    if n is None:
+        return {"ok": False, "error": "Please enter an integer color count (1 or higher)."}
+    if float(n).is_integer() and int(n) >= 1:
+        return {"ok": True, "value": int(n)}
+    return {"ok": False, "error": "Please enter an integer color count (1 or higher)."}
+
+
+def _parse_elevation(text: str) -> Dict[str, Any]:
+    low = str(text or "").strip().lower()
+    synonyms = {
+        "flat": "flat",
+        "raised": "raised",
+        "elevated": "raised",
+        "bump": "raised",
+        "bumpy": "raised",
+        "nodule": "nodular",
+        "nodular": "nodular",
+        "lump": "nodular",
+    }
+    for token, mapped in synonyms.items():
+        if re.search(rf"\b{re.escape(token)}\b", low):
+            return {"ok": True, "value": mapped}
+    return {"ok": False, "error": "Please answer with one of: flat, raised, or nodular."}
+
+
+def _is_valid_answer(field_key: str, value: Any) -> bool:
+    if field_key == "bleeding":
+        return isinstance(value, bool)
+    if field_key in {"itching", "border_irregularity", "pain"}:
+        try:
+            v = float(value)
+            return 0.0 <= v <= 10.0
+        except Exception:
+            return False
+    if field_key == "width_mm":
+        try:
+            return float(value) > 0.0
+        except Exception:
+            return False
+    if field_key == "num_colors":
+        return isinstance(value, int) and value >= 1
+    if field_key == "elevation":
+        return str(value or "").strip().lower() in {"flat", "raised", "nodular"}
+    return False
+
+
+def _next_question_key(answers: Dict[str, Any]) -> Optional[str]:
+    for q in QUESTION_FLOW:
+        key = q["key"]
+        if not _is_valid_answer(key, answers.get(key)):
+            return key
+    return None
+
+
+def _question_prompt(field_key: str) -> str:
+    for q in QUESTION_FLOW:
+        if q["key"] == field_key:
+            return q["prompt"]
+    return ""
+
+
+def _validate_for_field(field_key: str, text: str) -> Dict[str, Any]:
+    if field_key == "bleeding":
+        yn = _parse_yes_no_strict(text)
+        if yn is None:
+            return {"ok": False, "error": "Please answer yes or no."}
+        return {"ok": True, "value": yn}
+    if field_key in {"itching", "border_irregularity", "pain"}:
+        return _parse_zero_to_ten(text)
+    if field_key == "width_mm":
+        return _parse_width_mm(text)
+    if field_key == "num_colors":
+        return _parse_num_colors(text)
+    if field_key == "elevation":
+        return _parse_elevation(text)
+    return {"ok": False, "error": "Invalid field."}
+
+
+def _seed_answers_from_state(state: ConvState, metadata: Dict[str, Any]) -> None:
+    answers = state.answers
+    symptom_flags = (state.case_state.get("symptom_flags") or {}) if isinstance(state.case_state, dict) else {}
+
+    if "bleeding" not in answers:
+        raw_bleeding = symptom_flags.get("bleeding")
+        if isinstance(raw_bleeding, bool):
+            answers["bleeding"] = raw_bleeding
+        elif isinstance(raw_bleeding, str):
+            yn = _parse_yes_no_strict(raw_bleeding)
+            if yn is not None:
+                answers["bleeding"] = yn
+
+    def _seed_numeric(target_key: str, candidates: List[Any], low: Optional[float] = None, high: Optional[float] = None) -> None:
+        if target_key in answers and _is_valid_answer(target_key, answers.get(target_key)):
+            return
+        for cand in candidates:
+            if cand in (None, ""):
+                continue
+            try:
+                num = float(cand)
+            except Exception:
+                continue
+            if low is not None and num < low:
+                continue
+            if high is not None and num > high:
+                continue
+            if target_key == "num_colors":
+                if float(num).is_integer() and int(num) >= 1:
+                    answers[target_key] = int(num)
+                    return
+                continue
+            answers[target_key] = num
+            return
+
+    _seed_numeric("itching", [state.slots.get("itching_0_10"), symptom_flags.get("itching_0_10")], low=0, high=10)
+    _seed_numeric(
+        "width_mm",
+        [
+            state.slots.get("diameter_mm"),
+            symptom_flags.get("diameter_mm"),
+            metadata.get("diameter_mm"),
+        ],
+        low=0,
+    )
+    if not _is_valid_answer("border_irregularity", answers.get("border_irregularity")):
+        border_candidates = [
+            state.slots.get("border_irregularity_0_10"),
+            symptom_flags.get("border_irregularity_0_10"),
+            symptom_flags.get("border_irregularity"),
+            state.slots.get("border_irregularity"),
+        ]
+        for cand in border_candidates:
+            if cand in (None, ""):
+                continue
+            try:
+                b = float(cand)
+            except Exception:
+                continue
+            if 0.0 <= b <= 1.0:
+                b = b * 10.0
+            if 0.0 <= b <= 10.0:
+                answers["border_irregularity"] = b
+                break
+    _seed_numeric("num_colors", [state.slots.get("number_of_colors"), symptom_flags.get("number_of_colors")], low=1)
+    _seed_numeric("pain", [state.slots.get("pain_0_10"), symptom_flags.get("pain_0_10")], low=0, high=10)
+
+    if "elevation" not in answers:
+        elev = state.slots.get("elevation") or symptom_flags.get("elevation") or metadata.get("elevation")
+        if elev not in (None, ""):
+            parsed = _parse_elevation(str(elev))
+            if parsed.get("ok"):
+                answers["elevation"] = parsed.get("value")
+
+
+def _sync_answers_to_legacy_slots(state: ConvState) -> None:
+    answers = state.answers
+    if _is_valid_answer("bleeding", answers.get("bleeding")):
+        state.slots["bleeding"] = bool(answers["bleeding"])
+    if _is_valid_answer("itching", answers.get("itching")):
+        state.slots["itching_0_10"] = float(answers["itching"])
+    if _is_valid_answer("width_mm", answers.get("width_mm")):
+        state.slots["diameter_mm"] = float(answers["width_mm"])
+    if _is_valid_answer("border_irregularity", answers.get("border_irregularity")):
+        border_0_10 = float(answers["border_irregularity"])
+        state.slots["border_irregularity_0_10"] = border_0_10
+        state.slots["border_irregularity"] = border_0_10 / 10.0
+    if _is_valid_answer("num_colors", answers.get("num_colors")):
+        n = int(answers["num_colors"])
+        state.slots["number_of_colors"] = n
+        if n >= 3:
+            state.slots["color_variegation"] = 1.0
+        elif n == 2:
+            state.slots["color_variegation"] = 0.5
+        else:
+            state.slots["color_variegation"] = 0.0
+    if _is_valid_answer("elevation", answers.get("elevation")):
+        state.slots["elevation"] = str(answers["elevation"]).lower()
+    if _is_valid_answer("pain", answers.get("pain")):
+        state.slots["pain_0_10"] = float(answers["pain"])
+
+
+def _compute_result(answers: Dict[str, Any]) -> Dict[str, str]:
+    score = 0
+    if answers.get("bleeding") is True:
+        score += 2
+    if float(answers.get("itching", 0) or 0) >= 7:
+        score += 1
+    if float(answers.get("width_mm", 0) or 0) >= 10:
+        score += 3
+    elif float(answers.get("width_mm", 0) or 0) >= 6:
+        score += 2
+    if float(answers.get("border_irregularity", 0) or 0) >= 7:
+        score += 2
+    n_colors = int(answers.get("num_colors") or 1)
+    if n_colors >= 3:
+        score += 2
+    elif n_colors == 2:
+        score += 1
+    elev = str(answers.get("elevation") or "").lower()
+    if elev == "nodular":
+        score += 2
+    elif elev == "raised":
+        score += 1
+    if float(answers.get("pain", 0) or 0) >= 7:
+        score += 1
+
+    if score >= 7:
+        risk = "high"
+        next_step = "Recommended next step: urgent dermatology visit (ideally within 24–48 hours)."
+    elif score >= 4:
+        risk = "moderate"
+        next_step = "Recommended next step: book a dermatology appointment soon for in-person evaluation."
+    else:
+        risk = "low"
+        next_step = "Recommended next step: monitor closely and schedule a routine dermatology review if any change occurs."
+
+    lines = [
+        "Result",
+        f"- Bleeding: {'yes' if answers.get('bleeding') else 'no'}",
+        f"- Itching (0-10): {float(answers.get('itching')):g}",
+        f"- Width (mm): {float(answers.get('width_mm')):g}",
+        f"- Border irregularity (0-10): {float(answers.get('border_irregularity')):g}",
+        f"- Number of colors: {int(answers.get('num_colors'))}",
+        f"- Elevation: {str(answers.get('elevation')).lower()}",
+        f"- Pain (0-10): {float(answers.get('pain')):g}",
+        f"- Risk level: {risk}",
+        next_step,
+        "This is not a diagnosis; in-person clinician review is recommended for concerning changes.",
+    ]
+    return {"risk": risk, "message": "\n".join(lines)}
+
+
 # ---------------------------
 # Main step
 # ---------------------------
 
 def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     metadata = _norm_meta(metadata)
-
-    _infer_pending_from_last_bot(state)
-    _apply_pending_slot(state, user_text)
-
-    if metadata and "classifier_probs" in metadata:
-        raw = metadata["classifier_probs"]
-        if isinstance(raw, str):
-            try:
-                metadata["classifier_probs"] = json.loads(raw)
-            except Exception:
-                metadata["classifier_probs"] = {}
 
     if metadata:
         if metadata.get("body_site"):
@@ -876,123 +1153,80 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             state.slots["fitzpatrick_type"] = metadata.get("fitzpatrick")
         if metadata.get("duration_days") is not None:
             state.slots["duration_days"] = metadata.get("duration_days")
-        if metadata.get("classifier_probs"):
-            state.slots["classifier_probs"] = metadata.get("classifier_probs")
 
     case_context = _build_structured_case_context(state, metadata)
-    llm_input = _build_llm_turn_input(case_context, user_text)
+    _seed_answers_from_state(state, metadata)
+    _sync_answers_to_legacy_slots(state)
 
-    initial_history_size = len(state.history)
-    state.trim_history(max_turns=10)
-    print(f"[step] History trimmed: {initial_history_size} → {len(state.history)} messages")
+    current_key = _next_question_key(state.answers)
+    incoming_text = str(user_text or "").strip()
 
-    chat = _get_model().start_chat(history=state.history)
+    if current_key and incoming_text:
+        validated = _validate_for_field(current_key, incoming_text)
+        if validated.get("ok"):
+            state.answers[current_key] = validated.get("value")
+            _sync_answers_to_legacy_slots(state)
+            current_key = _next_question_key(state.answers)
+            state.pending_slot = current_key
+        else:
+            prompt = _question_prompt(current_key)
+            reply_text = f"{validated.get('error')} {prompt}".strip()
+            state.pending_slot = current_key
+            state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
+            state.history.append({"role": "model", "parts": [{"text": reply_text}]})
+            return {
+                "reply": reply_text,
+                "message": reply_text,
+                "assistant": reply_text,
+                "text": reply_text,
+                "follow_up_question": "None",
+                "fields_needed": [current_key],
+                "ready_for_assessment": False,
+                "slots": state.slots,
+                "answers": state.answers,
+                "case_state": case_context,
+                "pending_slot": current_key,
+            }
 
-    try:
-        initial = _retry_api_call(chat.send_message, llm_input)
-    except Exception as e:
-        msg = str(e)
-        if "429" in msg or "Resource exhausted" in msg or "rate limit" in msg.lower():
-            print(f"[step] 429 Rate limit detected after retries: {msg[:200]}")
+    if current_key:
+        prompt = _question_prompt(current_key)
+        reply_text = prompt
+        state.pending_slot = current_key
+        if incoming_text:
+            state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
+        state.history.append({"role": "model", "parts": [{"text": reply_text}]})
         return {
-            "reply": f"Model error: {e}\n"
-                     "Try setting GEMINI_MODEL to a supported name (e.g., "
-                     "gemini-2.0-flash, gemini-1.5-flash-8b, or gemini-1.5-pro).",
-            "message": str(e),
-            "assistant": "[Error - please retry]",
-            "text": str(e),
-            "error": str(e),
-            "error_code": "RATE_LIMIT" if ("429" in msg or "resource exhausted" in msg.lower()) else "MODEL_ERROR",
+            "reply": reply_text,
+            "message": reply_text,
+            "assistant": reply_text,
+            "text": reply_text,
+            "follow_up_question": "None",
+            "fields_needed": [current_key],
+            "ready_for_assessment": False,
+            "slots": state.slots,
+            "answers": state.answers,
+            "case_state": case_context,
+            "pending_slot": current_key,
         }
 
-    # 2) tool call handling
-    reply_text = None
-    reply_struct = None
-    tool_payload = None
-
-    cand = (initial.candidates or [None])[0]
-    parts = getattr(getattr(cand, "content", None), "parts", []) if cand else []
-
-    for part in parts:
-        fc = getattr(part, "function_call", None)
-        if fc and getattr(fc, "name", None) == "expert_derm_consult":
-            raw_args = getattr(fc, "args", None) or getattr(fc, "arguments", None)
-            args = _coerce_call_args(raw_args)
-
-            args.update({k: v for k, v in state.slots.items() if v is not None})
-
-            if "patient_age" not in args and state.slots.get("patient_age") is not None:
-                args["patient_age"] = state.slots["patient_age"]
-            if "body_site" not in args and state.slots.get("body_site"):
-                args["body_site"] = state.slots["body_site"]
-
-            tool_payload = _run_rules(args)
-
-            nxt = (tool_payload.get("next_questions") or [])
-            if nxt:
-                q = nxt[0].lower()
-                if "bled" in q:
-                    state.pending_slot = "bleeding"
-                elif "crust" in q or "scab" in q:
-                    state.pending_slot = "crusting"
-                elif "itch" in q:
-                    state.pending_slot = "itching"
-                elif "pain" in q:
-                    state.pending_slot = "pain"
-                elif "how many colors" in q:
-                    state.pending_slot = "number_of_colors"
-                elif "how wide" in q or "diameter" in q:
-                    state.pending_slot = "diameter_mm"
-
-            reply_text = _format_tool_reply(tool_payload)
-            fallback_question = (nxt[0] if nxt else "None")
-
-            reply_struct = {
-                "message": reply_text,
-                "follow_up_question": fallback_question or "None",
-                "fields_needed": _derive_fields_needed(case_context),
-                "ready_for_assessment": (fallback_question in (None, "", "None")),
-            }
-            break
-
-    if not reply_text:
-        reply_text = _resp_text(initial)
-
-    reply_text = _sanitize_user_reply(reply_text)
-
-    if reply_struct is None:
-        reply_struct = _parse_structured_reply(
-            reply_text,
-            case_context,
-            _default_follow_up_from_missing(case_context),
-        )
-
-    reply_text = reply_struct.get("message") or reply_text
-
-    if not reply_text:
-        reply_text = "I’m here. Share diameter, color changes, evolution (weeks), age, and body site."
-
-    state.history.append({"role": "user", "parts": [{"text": user_text or ""}]})
+    result_payload = _compute_result(state.answers)
+    reply_text = result_payload["message"]
+    state.pending_slot = None
+    if incoming_text:
+        state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
     state.history.append({"role": "model", "parts": [{"text": reply_text}]})
 
-    out: Dict[str, Any] = {
+    return {
         "reply": reply_text,
         "message": reply_text,
         "assistant": reply_text,
         "text": reply_text,
-        "follow_up_question": reply_struct.get("follow_up_question", "None"),
-        "fields_needed": reply_struct.get("fields_needed", []),
-        "ready_for_assessment": bool(reply_struct.get("ready_for_assessment", False)),
+        "follow_up_question": "None",
+        "fields_needed": [],
+        "ready_for_assessment": True,
         "slots": state.slots,
-        "case_state": state.case_state,
-        "pending_slot": state.pending_slot,
+        "answers": state.answers,
+        "case_state": case_context,
+        "pending_slot": None,
+        "risk_level": result_payload.get("risk"),
     }
-
-    if tool_payload:
-        out["explanations"] = tool_payload.get("rule_explanations", [])
-        out["findings"] = tool_payload.get("findings", [])
-        out["next_questions"] = tool_payload.get("next_questions", [])
-        out["safety_flags"] = tool_payload.get("safety_flags", [])
-        out["audit"] = tool_payload.get("audit", {})
-
-    return out

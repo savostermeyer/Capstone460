@@ -282,7 +282,10 @@ def _merge_intake_into_session_store(sid: str, incoming: dict) -> dict:
             continue
         if isinstance(value, dict) and isinstance(current.get(key), dict):
             merged = dict(current.get(key) or {})
-            merged.update(value)
+            for nested_key, nested_value in value.items():
+                if nested_value in (None, "", [], {}):
+                    continue
+                merged[nested_key] = nested_value
             current[key] = merged
         else:
             current[key] = value
