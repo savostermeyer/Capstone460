@@ -16,7 +16,7 @@ print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
 
 import google.generativeai as genai
 from expertSystem.clinical_risk import build_combined_risk_summary
-from expertSystem.medical_references_cache import format_references_section
+from expertSystem.medical_references_cache import get_cached_references
 from expertSystem.cf_probability_integration import run_cf_disease_fusion
 
 
@@ -354,6 +354,8 @@ class ConvState:
     answers: Dict[str, Any] = field(default_factory=dict)
     pending_slot: Optional[str] = None
     case_state: Dict[str, Any] = field(default_factory=dict)
+    awaiting_more_info_choice: bool = False
+    last_analysis_details: Dict[str, Any] = field(default_factory=dict)
 
     def trim_history(self, max_turns: int = 10):
         max_messages = max_turns * 2
@@ -1224,28 +1226,31 @@ def _compute_result(answers: Dict[str, Any], state: ConvState) -> Dict[str, Any]
 
     top3 = cf_fusion.get("top3", [])
     top_breakdown = cf_fusion.get("top_disease_breakdown", {})
+    references_cache = get_cached_references()
+    reference_links = [
+        {
+            "source": str(item.get("source") or "Trusted source"),
+            "title": str(item.get("title") or "Reference"),
+            "url": str(item.get("url") or ""),
+        }
+        for item in (references_cache.get("snippets") or [])
+        if isinstance(item, dict) and str(item.get("url") or "").strip()
+    ]
 
     intake_section = "\n".join(
         [
-            "Intake summary",
+            "Inputs",
             f"- Bleeding: {'yes' if answers.get('bleeding') else 'no'}",
             f"- Itching (0-10): {float(answers.get('itching')):g}",
             f"- Width (mm): {float(answers.get('width_mm')):g}",
-            f"- Border irregularity (0-10): {float(answers.get('border_irregularity')):g}",
-            f"- Number of colors: {int(answers.get('num_colors'))}",
-            f"- Elevation: {str(answers.get('elevation')).lower()}",
-            f"- Pain (0-10): {float(answers.get('pain')):g}",
+            f"- Border: {float(answers.get('border_irregularity')):g}/10, Colors: {int(answers.get('num_colors'))}, Elevation: {str(answers.get('elevation')).lower()}, Pain: {float(answers.get('pain')):g}/10",
         ]
     )
 
     prediction_section = "\n".join(
         [
-            "Prediction summary",
-            f"- Clinical risk points: {int(clinical.get('points', 0) or 0)} ({clinical.get('level', 'low')})",
-            f"- Clinical probability: {float(clinical.get('probability_percent', 0.0) or 0.0):.1f}%",
-            f"- Model risk: {model.get('level', 'low')} (score {float(model.get('score', 0.0) or 0.0):.2f})",
-            f"- Final risk (conservative): {final.get('level', 'low')}",
-            f"- Top disease (%): {top_breakdown.get('label', 'unknown')} (model {float(top_breakdown.get('model_percent', 0.0) or 0.0):.2f}%, expert {float(top_breakdown.get('expert_percent', 0.0) or 0.0):.2f}%, final {float(top_breakdown.get('final_percent', 0.0) or 0.0):.2f}%)",
+            "Results",
+            f"- Top disease: {top_breakdown.get('label', 'unknown')} ({float(top_breakdown.get('final_percent', 0.0) or 0.0):.2f}%)",
             "- Top 3 final diseases: "
             + (
                 ", ".join(
@@ -1255,27 +1260,49 @@ def _compute_result(answers: Dict[str, Any], state: ConvState) -> Dict[str, Any]
                 if top3
                 else "Unavailable"
             ),
-            "This is not a diagnosis; in-person clinician review is recommended for concerning changes.",
         ]
     )
 
-    references_and_steps_section = "\n".join(
+    step_section = "\n".join(
         [
             f"Recommended next step: {final.get('recommended_next_step', '')}",
-            "",
-            format_references_section(),
         ]
     )
 
-    lines = [intake_section, prediction_section, references_and_steps_section]
+    opt_in_section = "Want more info? Reply: details / links / no"
+
+    details_payload = {
+        "clinical_points": int(clinical.get("points", 0) or 0),
+        "clinical_probability_percent": float(clinical.get("probability_percent", 0.0) or 0.0),
+        "model_risk": {
+            "level": model.get("level", "low"),
+            "score": float(model.get("score", 0.0) or 0.0),
+        },
+        "final_risk": {
+            "level": final.get("level", "low"),
+            "method": final.get("method", ""),
+        },
+        "top_disease_breakdown": top_breakdown,
+        "top3": top3,
+        "reasoning": cf_fusion.get("reasoning", []),
+        "model_probs": cf_fusion.get("model_probs", {}),
+        "expert_probs": cf_fusion.get("expert_probs", {}),
+        "final_probs": cf_fusion.get("final_probs", {}),
+        "references": reference_links,
+    }
+
+    lines = [intake_section, prediction_section, step_section, opt_in_section]
     return {
         "risk": final.get("level", "low"),
         "message": "\n".join(lines),
         "message_sections": [
             intake_section,
             prediction_section,
-            references_and_steps_section,
+            step_section,
+            opt_in_section,
         ],
+        "awaiting_more_info_choice": True,
+        "last_analysis_details": details_payload,
         "summary": {
             "clinical_risk": clinical,
             "model_risk": model,
@@ -1289,8 +1316,60 @@ def _compute_result(answers: Dict[str, Any], state: ConvState) -> Dict[str, Any]
                 "reasoning": cf_fusion.get("reasoning", []),
                 "top_disease_breakdown": top_breakdown,
             },
+            "references": reference_links,
         },
     }
+
+
+def _format_details_bubble(details: Dict[str, Any]) -> str:
+    top = details.get("top_disease_breakdown", {}) if isinstance(details, dict) else {}
+    top3 = details.get("top3", []) if isinstance(details, dict) else []
+    reasoning = details.get("reasoning", []) if isinstance(details, dict) else []
+    reasoning_lines = [f"- {str(item)}" for item in reasoning[:5]] if reasoning else ["- No additional reasoning available."]
+
+    return "\n".join(
+        [
+            "Detailed breakdown",
+            f"- Clinical points: {int(details.get('clinical_points', 0) or 0)}",
+            f"- Clinical probability: {float(details.get('clinical_probability_percent', 0.0) or 0.0):.1f}%",
+            f"- Top disease breakdown: {top.get('label', 'unknown')} (model {float(top.get('model_percent', 0.0) or 0.0):.2f}%, expert {float(top.get('expert_percent', 0.0) or 0.0):.2f}%, final {float(top.get('final_percent', 0.0) or 0.0):.2f}%)",
+            "- Top 3: "
+            + (
+                ", ".join(
+                    f"{str(item.get('label', 'unknown'))} {float(item.get('final_percent', 0.0) or 0.0):.2f}%"
+                    for item in top3[:3]
+                )
+                if top3
+                else "Unavailable"
+            ),
+            "Reasoning factors:",
+            *reasoning_lines,
+            "Reply links / no",
+        ]
+    )
+
+
+def _format_links_bubble(details: Dict[str, Any]) -> str:
+    refs = details.get("references", []) if isinstance(details, dict) else []
+    if not refs:
+        return "Reference links are currently unavailable. Reply details / no"
+
+    lines = ["Reference links"]
+    for item in refs[:6]:
+        lines.append(f"- {str(item.get('source', 'Source'))}: {str(item.get('title', 'Reference'))} — {str(item.get('url', ''))}")
+    lines.append("Reply details / no")
+    return "\n".join(lines)
+
+
+def _parse_more_info_choice(text: str) -> Optional[str]:
+    low = str(text or "").strip().lower()
+    if re.search(r"\bdetails?\b", low):
+        return "details"
+    if re.search(r"\blinks?\b|\burls?\b|\breferences?\b", low):
+        return "links"
+    if re.search(r"\bno\b|\bnope\b|\bnah\b|\bnot now\b", low):
+        return "no"
+    return None
 
 
 # ---------------------------
@@ -1314,8 +1393,86 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
     _seed_answers_from_state(state, metadata)
     _sync_answers_to_legacy_slots(state)
 
-    current_key = _next_question_key(state.answers)
     incoming_text = str(user_text or "").strip()
+    current_key = _next_question_key(state.answers)
+
+    if state.awaiting_more_info_choice and incoming_text:
+        choice = _parse_more_info_choice(incoming_text)
+        if choice == "details":
+            reply_text = _format_details_bubble(state.last_analysis_details or {})
+            state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
+            state.history.append({"role": "model", "parts": [{"text": reply_text}]})
+            return {
+                "reply": reply_text,
+                "message": reply_text,
+                "assistant": reply_text,
+                "text": reply_text,
+                "follow_up_question": "None",
+                "fields_needed": [],
+                "ready_for_assessment": True,
+                "slots": state.slots,
+                "answers": state.answers,
+                "case_state": case_context,
+                "pending_slot": None,
+                "awaiting_more_info_choice": True,
+            }
+
+        if choice == "links":
+            reply_text = _format_links_bubble(state.last_analysis_details or {})
+            state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
+            state.history.append({"role": "model", "parts": [{"text": reply_text}]})
+            return {
+                "reply": reply_text,
+                "message": reply_text,
+                "assistant": reply_text,
+                "text": reply_text,
+                "follow_up_question": "None",
+                "fields_needed": [],
+                "ready_for_assessment": True,
+                "slots": state.slots,
+                "answers": state.answers,
+                "case_state": case_context,
+                "pending_slot": None,
+                "awaiting_more_info_choice": True,
+            }
+
+        if choice == "no":
+            state.awaiting_more_info_choice = False
+            reply_text = "Understood. If you want more details later, just ask."
+            state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
+            state.history.append({"role": "model", "parts": [{"text": reply_text}]})
+            return {
+                "reply": reply_text,
+                "message": reply_text,
+                "assistant": reply_text,
+                "text": reply_text,
+                "follow_up_question": "None",
+                "fields_needed": [],
+                "ready_for_assessment": True,
+                "slots": state.slots,
+                "answers": state.answers,
+                "case_state": case_context,
+                "pending_slot": None,
+                "awaiting_more_info_choice": False,
+            }
+
+        reply_text = "Please reply with one option: details / links / no"
+        state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
+        state.history.append({"role": "model", "parts": [{"text": reply_text}]})
+        return {
+            "reply": reply_text,
+            "message": reply_text,
+            "assistant": reply_text,
+            "text": reply_text,
+            "follow_up_question": "None",
+            "fields_needed": [],
+            "ready_for_assessment": True,
+            "slots": state.slots,
+            "answers": state.answers,
+            "case_state": case_context,
+            "pending_slot": None,
+            "awaiting_more_info_choice": True,
+        }
 
     if current_key and incoming_text:
         validated = _validate_for_field(current_key, incoming_text)
@@ -1368,6 +1525,8 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
     result_payload = _compute_result(state.answers, state)
     reply_text = result_payload["message"]
     state.pending_slot = None
+    state.awaiting_more_info_choice = bool(result_payload.get("awaiting_more_info_choice", False))
+    state.last_analysis_details = dict(result_payload.get("last_analysis_details") or {})
     if incoming_text:
         state.history.append({"role": "user", "parts": [{"text": incoming_text}]})
     state.history.append({"role": "model", "parts": [{"text": reply_text}]})
@@ -1386,5 +1545,6 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
         "pending_slot": None,
         "risk_level": result_payload.get("risk"),
         "message_sections": result_payload.get("message_sections", []),
+        "awaiting_more_info_choice": state.awaiting_more_info_choice,
         "result_summary": result_payload.get("summary", {}),
     }

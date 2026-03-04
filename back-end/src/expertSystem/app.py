@@ -264,6 +264,7 @@ def _build_chat_internal_payload(metadata: dict, model_out: dict) -> dict:
         "model_probabilities": model_topk,
         "triggered_facts": triggered_facts,
         "pending_slot": model_out.get("pending_slot"),
+        "awaiting_more_info_choice": bool(model_out.get("awaiting_more_info_choice", False)),
         "case_context": session_case_state or {},
     }
 
@@ -286,6 +287,7 @@ def _build_chat_display_payload(model_out: dict) -> dict:
         "follow_up_question": follow_up_question,
         "fields_needed": fields_needed,
         "ready_for_assessment": ready_for_assessment,
+        "awaiting_more_info_choice": bool(model_out.get("awaiting_more_info_choice", False)),
         "disclaimer": CHAT_DISCLAIMER,
     }
 
@@ -969,6 +971,7 @@ def chat():
         response_payload["follow_up_question"] = display["follow_up_question"]
         response_payload["fields_needed"] = out.get("fields_needed", [])
         response_payload["ready_for_assessment"] = bool(out.get("ready_for_assessment", False))
+        response_payload["awaiting_more_info_choice"] = bool(display.get("awaiting_more_info_choice", False))
 
         return jsonify(response_payload)
 
