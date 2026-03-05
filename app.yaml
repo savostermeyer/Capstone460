@@ -1,13 +1,10 @@
-# Google Cloud Run deployment configuration
-# This file is optional but useful for configuring deployment settings
-runtime: python313
-
+# App Engine fallback configuration (Cloud Run is the primary deployment path)
+runtime: nodejs20
 env: standard
 
-entrypoint: gunicorn --bind :$PORT --workers 1 --timeout 600 expertSystem.app:app
+entrypoint: node server.js
 
 env_variables:
-  PYTHONUNBUFFERED: "1"
+  NODE_ENV: "production"
 
-# If you want to use App Engine instead of Cloud Run, use this file
-# For Cloud Run, the Dockerfile takes precedence
+# For Cloud Run, this file is not used.
