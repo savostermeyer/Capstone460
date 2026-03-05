@@ -300,6 +300,25 @@ def save_report():
         if reports_coll is None:
             return jsonify(error="Reports storage not configured"), 503
 
+        user_email = (
+            str(
+                payload.get("user_email")
+                or payload.get("userEmail")
+                or (payload.get("input", {}) or {}).get("user_email")
+                or (payload.get("input", {}) or {}).get("userEmail")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+        if not user_email:
+            return jsonify(error="user_email is required"), 400
+
+        payload["user_email"] = user_email
+        payload.setdefault("input", {})
+        if isinstance(payload["input"], dict):
+            payload["input"]["user_email"] = user_email
+
         # attach timestamp
         payload["createdAt"] = (
             payload.get("createdAt")
@@ -319,7 +338,13 @@ def list_reports():
     try:
         if reports_coll is None:
             return jsonify([])
-        docs = list(reports_coll.find().sort("createdAt", -1).limit(100))
+
+        user_email = str(request.args.get("user_email") or "").strip().lower()
+        query = {}
+        if user_email:
+            query["user_email"] = user_email
+
+        docs = list(reports_coll.find(query).sort("createdAt", -1).limit(100))
         out = []
         for d in docs:
             d["id"] = str(d.pop("_id"))

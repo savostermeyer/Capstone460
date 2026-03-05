@@ -1,34 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-// Class code mapping (keep these exact)
-const CLASS_LABELS = {
-  akiec: "Actinic keratosis",
-  bcc: "Basal cell carcinoma",
-  bkl: "Benign keratosis",
-  df: "Dermatofibroma",
-  mel: "Melanoma",
-  nv: "Melanocytic nevi",
-  vasc: "Vascular lesions",
-};
+const LOGIN_GATE_DELAY_MS = 1000;
 
-// Short “static” descriptions (safe + non-diagnostic)
-const CLASS_DESCRIPTIONS = {
-  akiec:
-    "Often appears as a rough, scaly patch caused by sun exposure. It can sometimes progress, so clinical evaluation is important.",
-  bcc:
-    "A common skin cancer that may look like a pearly bump or non-healing sore. Usually slow-growing, but should be checked by a clinician.",
-  bkl:
-    "A benign growth that can look waxy or scaly. Many are harmless, but changes in appearance should be evaluated.",
-  df:
-    "A typically benign, firm spot often found on the legs. Usually stable, but any rapid changes should be assessed.",
-  mel:
-    "A potentially serious skin cancer. New, changing, or irregular lesions require prompt medical evaluation.",
-  nv:
-    "A common mole-like lesion. Most are benign, but changes in size, shape, color, or symptoms warrant evaluation.",
-  vasc:
-    "A vascular-related lesion that may appear red/purple. Many are benign, but persistent or changing lesions should be checked.",
-};
+function getLoggedInUser() {
+  try {
+    const raw = (localStorage.getItem("skinai_user") || "").trim();
+    if (!raw || raw === "null" || raw === "undefined") {
+      return null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
 
 function fmtPct(x) {
   if (typeof x !== "number") return "";
@@ -46,185 +31,110 @@ function fmtDate(iso) {
   });
 }
 
-// Heuristic “low confidence / uncertain” rule (NOT a medical standard)
-function needsClinicianPrompt(top1, top2) {
-  if (!top1) return true;
-  const top1c = typeof top1.confidence === "number" ? top1.confidence : 0;
-  const top2c = typeof top2?.confidence === "number" ? top2?.confidence : 0;
+const DISEASE_LABELS = {
+  akiec: "Actinic keratoses and intraepithelial carcinoma (Bowen disease)",
+  bcc: "Basal cell carcinoma",
+  bkl: "Benign keratosis (seborrheic keratosis, lichen planus-like keratosis)",
+  df: "Dermatofibroma",
+  mel: "Melanoma",
+  nv: "Melanocytic nevus",
+  vasc: "Vascular lesion (angioma, angiokeratoma, hemorrhage)",
+};
 
-  if (top1c < 0.6) return true;
-  if (Math.abs(top1c - top2c) < 0.1) return true;
-  return false;
+const DISEASE_DESCRIPTIONS = {
+  akiec: "Precancerous, sun-related scaly lesions that can evolve over time.",
+  bcc: "Slow-growing skin cancer; often appears as a pearly or ulcerated bump.",
+  bkl: "Common, benign growths with a waxy or stuck-on appearance.",
+  df: "Benign, firm skin nodule, often on legs or arms.",
+  mel: "Potentially aggressive skin cancer; needs prompt evaluation.",
+  nv: "Common benign mole; usually stable in shape and color.",
+  vasc: "Benign blood-vessel lesion; may appear red, purple, or blue.",
+};
+
+function normalizeLabel(label) {
+  if (!label) return "Unknown";
+  const raw = String(label).trim();
+  const key = raw.toLowerCase();
+  if (DISEASE_LABELS[key]) return DISEASE_LABELS[key];
+  return raw;
 }
 
-async function fetchImageObjectUrl({ apiBase, imageId, signal }) {
-  const res = await fetch(
-    `${apiBase}/api/images/${encodeURIComponent(imageId)}`,
-    {
-      method: "GET",
-      credentials: "include",
-      signal,
-    }
+function predictionDescription(label) {
+  if (!label) return "";
+  const key = String(label).trim().toLowerCase();
+  if (DISEASE_DESCRIPTIONS[key]) return DISEASE_DESCRIPTIONS[key];
+
+  const normalized = normalizeLabel(label).toLowerCase();
+  const matchKey = Object.keys(DISEASE_LABELS).find(
+    (abbr) => DISEASE_LABELS[abbr].toLowerCase() === normalized,
   );
-
-  if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
-}
-
-async function tryFetchReportsFromApi({ apiBase, signal }) {
-  const res = await fetch(`${apiBase}/api/reports`, {
-    method: "GET",
-    credentials: "include",
-    signal,
-  });
-
-  if (!res.ok) return null;
-
-  const contentType = res.headers.get("content-type") || "";
-  if (!contentType.includes("application/json")) return null;
-
-  const data = await res.json();
-  if (Array.isArray(data)) return data;
-  if (data && Array.isArray(data.reports)) return data.reports;
-  return null;
-}
-
-async function tryDeleteReportFromApi({ apiBase, id }) {
-  // Best-effort delete
-  try {
-    await fetch(`${apiBase}/api/reports/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-  } catch {
-    // ignore: UI/localStorage will still update
+  if (matchKey && DISEASE_DESCRIPTIONS[matchKey]) {
+    return DISEASE_DESCRIPTIONS[matchKey];
   }
+
+  return "Consider a clinician review to confirm and correlate clinically.";
 }
 
-function downloadHtmlReport({ report, imageUrls, userEmail }) {
-  const top = (report.topPredictions || []).slice(0, 3);
-  const top1 = top[0];
-  const top2 = top[1];
-  const uncertain = needsClinicianPrompt(top1, top2);
+function getTopPredictions(report) {
+  const raw =
+    report?.analysis?.top_predictions ||
+    report?.analysis?.model_topk ||
+    report?.topPredictions ||
+    [];
 
-  const imagesHtml = (report.images || [])
-    .map((img) => {
-      const key = img.imageId || img.filename;
-      const url = imageUrls[key];
-      if (!url) return "";
+  return raw.map((p) => ({
+    label: p.label || p.name || "Unknown",
+    confidence: p.confidence ?? p.prob ?? p.score ?? 0,
+  }));
+}
 
-      return `
-        <div style="margin: 10px 0;">
-          <div style="color:#666; font-size: 12px; margin-bottom: 6px;">
-            ${img.filename || ""}
-          </div>
-          <img
-            src="${url}"
-            style="max-width: 100%; border: 1px solid #ddd; border-radius: 8px;"
-          />
-        </div>
-      `;
-    })
-    .join("");
-
-  const predsHtml = top.length
-    ? `
-      <ol>
-        ${top
-          .map((p) => {
-            const label =
-              CLASS_LABELS[p.code] || p.label || p.code || "Unknown";
-            const desc = CLASS_DESCRIPTIONS[p.code] || "";
-            const pct = fmtPct(p.confidence);
-
-            return `
-              <li style="margin-bottom: 10px;">
-                <div><strong>${label}</strong> — ${pct}</div>
-                <div style="color:#444; margin-top: 4px;">${desc}</div>
-              </li>
-            `;
-          })
-          .join("")}
-      </ol>
-    `
-    : `<p><em>No predictions available yet.</em></p>`;
-
-  const html = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>SkinAI Report</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
-      .muted { color: #555; }
-      .warn { background: #fff3cd; border: 1px solid #ffe69c; padding: 12px; border-radius: 10px; }
-      .box { border: 1px solid #ddd; padding: 14px; border-radius: 12px; margin-top: 12px; }
-      h1 { margin: 0 0 6px 0; }
-    </style>
-  </head>
-  <body>
-    <h1>SkinAI Report</h1>
-    <div class="muted">
-      Generated: ${fmtDate(report.createdAt)}
-      ${userEmail ? ` • User: ${userEmail}` : ""}
-    </div>
-
-    <div class="box">
-      <h2 style="margin:0 0 10px 0;">Images</h2>
-      ${imagesHtml || "<p><em>No images available.</em></p>"}
-    </div>
-
-    <div class="box">
-      <h2 style="margin:0 0 10px 0;">Top 3 Predictions</h2>
-      ${predsHtml}
-    </div>
-
-    <div class="warn" style="margin-top: 14px;">
-      <strong>Important:</strong> This report is generated by an AI model and is
-      <strong>not</strong> a medical diagnosis. If you are concerned, or if the
-      lesion is new, changing, painful, bleeding, or irregular, seek evaluation
-      by a licensed clinician.
-      ${
-        uncertain
-          ? `<div style="margin-top:8px;">
-              <strong>Low confidence / uncertain result:</strong>
-              We recommend consulting a dermatologist for an accurate assessment.
-            </div>`
-          : ""
-      }
-    </div>
-  </body>
-</html>`;
-
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `skinai_report_${report.id || "report"}.html`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(url);
+function nextStepForRisk(riskScore) {
+  const score = String(riskScore || "").toLowerCase();
+  if (score === "high_risk" || score === "high") {
+    return "Schedule an urgent dermatology visit and avoid delays.";
+  }
+  if (score === "moderate_risk" || score === "moderate") {
+    return "Book a dermatology appointment within the next few weeks.";
+  }
+  if (score === "low_risk" || score === "low") {
+    return "Monitor for changes and practice sun protection; see a clinician if it changes.";
+  }
+  return "Seek medical advice if you are concerned or notice changes.";
 }
 
 export default function Reports() {
   const navigate = useNavigate();
 
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+  const [userEmail, setUserEmail] = useState(getLoggedInUser);
 
-  const userEmail = useMemo(() => {
-    try {
-      return localStorage.getItem("skinai_user");
-    } catch {
-      return null;
-    }
+  const [showLoginGate, setShowLoginGate] = useState(false);
+
+  useEffect(() => {
+    const syncUser = () => setUserEmail(getLoggedInUser());
+
+    syncUser();
+    window.addEventListener("storage", syncUser);
+    window.addEventListener("focus", syncUser);
+
+    return () => {
+      window.removeEventListener("storage", syncUser);
+      window.removeEventListener("focus", syncUser);
+    };
   }, []);
 
-  const isLoggedIn = Boolean(userEmail);
+  useEffect(() => {
+    if (userEmail) {
+      setShowLoginGate(false);
+      return;
+    }
+
+    const timerId = setTimeout(() => {
+      setShowLoginGate(true);
+    }, LOGIN_GATE_DELAY_MS);
+
+    return () => clearTimeout(timerId);
+  }, [userEmail]);
+
   const storageKey = userEmail ? `skinai_reports_${userEmail}` : null;
 
   const [reports, setReports] = useState([]);
@@ -238,137 +148,45 @@ export default function Reports() {
 
   // Load reports: API first, then localStorage
   useEffect(() => {
-    if (!isLoggedIn || !storageKey) return;
-
-    const controller = new AbortController();
+    const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
 
     async function load() {
-      setLoading(true);
-      setMsg("");
-
-      try {
-        const apiReports = await tryFetchReportsFromApi({
-          apiBase: API_BASE,
-          signal: controller.signal,
-        });
-
-        if (apiReports) {
-          setReports(apiReports);
-          setLoading(false);
-          return;
-        }
-      } catch (e) {
-        if (e?.name !== "AbortError") {
-          // silent fallback
-        }
-      }
-
-      try {
-        const raw = localStorage.getItem(storageKey);
-        const data = raw ? JSON.parse(raw) : [];
-        setReports(Array.isArray(data) ? data : []);
-      } catch (err) {
-        console.error(err);
-        setMsg("Could not load reports.");
+      if (!userEmail) {
         setReports([]);
-      } finally {
-        setLoading(false);
+        return;
       }
+
+      if (API_BASE) {
+        try {
+          const res = await fetch(
+            `${API_BASE}/reports?user_email=${encodeURIComponent(userEmail)}`,
+          );
+          if (res.ok) {
+            const js = await res.json();
+            if (Array.isArray(js) && js.length > 0) {
+              setReports(js);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn("Could not fetch reports from backend", e);
+        }
+      }
+
+      if (!storageKey) return;
+      const raw = localStorage.getItem(storageKey);
+      let data = raw ? JSON.parse(raw) : [];
+      // Ensure each report has an id for proper functionality
+      data = data.map((r) => ({
+        ...r,
+        id: r.id || "report_" + (r.createdAt ? new Date(r.createdAt).getTime() : Date.now()) + "_" + Math.random().toString(36).substring(2, 9),
+      }));
+      setReports(data);
     }
 
     load();
-    return () => controller.abort();
-  }, [isLoggedIn, storageKey, API_BASE]);
+  }, [storageKey, userEmail]);
 
-  // Load image URLs:
-  // - If imageId exists => fetch from backend (/api/images/:id)
-  // - Else => try sessionStorage preview (Upload put it there)
-  useEffect(() => {
-    if (!isLoggedIn) return;
-
-    const controller = new AbortController();
-
-    async function loadImages() {
-      const toFetchIds = [];
-      const toSetLocal = {};
-
-      for (const r of reports) {
-        // Attach previewUrls from sessionStorage (best-effort)
-        try {
-          const raw = sessionStorage.getItem(`skinai_report_previews_${r.id}`);
-          if (raw) {
-            const pairs = JSON.parse(raw);
-            if (Array.isArray(pairs)) {
-              for (const pair of pairs) {
-                if (pair?.filename && pair?.previewUrl) {
-                  // key by filename (since localStorage report stores filename)
-                  toSetLocal[pair.filename] = pair.previewUrl;
-                }
-              }
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        for (const img of r.images || []) {
-          if (img?.imageId && !imageUrls[img.imageId]) {
-            toFetchIds.push(img.imageId);
-          }
-        }
-      }
-
-      // Set any sessionStorage previews immediately
-      if (Object.keys(toSetLocal).length > 0) {
-        setImageUrls((prev) => ({ ...prev, ...toSetLocal }));
-      }
-
-      const unique = Array.from(new Set(toFetchIds));
-      if (unique.length === 0) return;
-
-      const reallyFetch = unique.filter((id) => !imageUrls[id]);
-      if (reallyFetch.length === 0) return;
-
-      try {
-        const pairs = await Promise.all(
-          reallyFetch.map(async (id) => {
-            const url = await fetchImageObjectUrl({
-              apiBase: API_BASE,
-              imageId: id,
-              signal: controller.signal,
-            });
-            return [id, url];
-          })
-        );
-
-        setImageUrls((prev) => {
-          const next = { ...prev };
-          for (const [id, url] of pairs) {
-            next[id] = url;
-            urlCleanupRef.current.add(url);
-          }
-          return next;
-        });
-      } catch (e) {
-        if (e?.name !== "AbortError") {
-          console.error(e);
-          setMsg("Some images could not be loaded.");
-        }
-      }
-    }
-
-    loadImages();
-    return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports, isLoggedIn, API_BASE]);
-
-  // Cleanup created object URLs on unmount
-  useEffect(() => {
-    return () => {
-      for (const url of urlCleanupRef.current) URL.revokeObjectURL(url);
-      urlCleanupRef.current.clear();
-    };
-  }, []);
 
   function signOut() {
     try {
@@ -377,13 +195,12 @@ export default function Reports() {
     navigate("/login", { replace: true });
   }
 
-  async function deleteReport(id) {
-    if (!storageKey) return;
+  function deleteReport(id) {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      return;
+    }
 
-    // Best-effort backend delete (A)
-    tryDeleteReportFromApi({ apiBase: API_BASE, id });
-
-    // Always update UI + localStorage
     const next = reports.filter((r) => r.id !== id);
     setReports(next);
 
@@ -397,34 +214,109 @@ export default function Reports() {
     } catch {}
   }
 
-  if (!isLoggedIn) {
-    return (
-      <main className="container">
-        <section className="section-pad" aria-labelledby="reports-title">
-          <h1 id="reports-title" className="h-title">
-            Reports
-          </h1>
+  async function downloadReport(report) {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      return;
+    }
 
-          <div className="card">
-            <p style={{ marginTop: 0 }}>
-              You must be logged in to view reports.
-            </p>
-            <p className="muted">
-              Log in to access saved analysis results and download reports.
-            </p>
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "pt", format: "letter" });
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      let y = 40;
 
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Link className="btn btn-cta" to="/login">
-                Log in
-              </Link>
-              <Link className="btn" to="/upload">
-                Go to Upload
-              </Link>
-            </div>
-          </div>
-        </section>
-      </main>
-    );
+      const addBlock = (text, size = 11, spacing = 6) => {
+        doc.setFontSize(size);
+        const lines = doc.splitTextToSize(text, pageWidth - 80);
+        lines.forEach((line) => {
+          if (y + size + spacing > pageHeight - 40) {
+            doc.addPage();
+            y = 40;
+          }
+          doc.text(line, 40, y);
+          y += size + spacing;
+        });
+      };
+
+      doc.setFontSize(16);
+      doc.text("SkinAI Report", 40, y);
+      y += 20;
+
+      addBlock(`Created: ${fmtDate(report.createdAt)}`);
+      if (report.input?.name) addBlock(`Patient: ${report.input.name}`);
+      if (report.input?.user_email) addBlock(`Email: ${report.input.user_email}`);
+      if (report.input?.age) addBlock(`Age: ${report.input.age}`);
+      if (report.input?.sex) addBlock(`Sex: ${report.input.sex}`);
+      if (report.input?.skinType) addBlock(`Skin Type: ${report.input.skinType}`);
+      if (report.input?.location) addBlock(`Location: ${report.input.location}`);
+      if (report.input?.duration_days) addBlock(`Duration: ${report.input.duration_days} days`);
+      if (report.input?.primarySymptoms) addBlock(`Symptoms: ${report.input.primarySymptoms}`);
+      if (report.input?.medicalBackground) addBlock(`Medical Background: ${report.input.medicalBackground}`);
+      if (report.input?.currentMedications) addBlock(`Current Medications: ${report.input.currentMedications}`);
+
+      const riskScore = report.analysis?.risk_score || report.primary_result || "N/A";
+      y += 8;
+      addBlock(`Risk Level: ${riskScore}`);
+      addBlock(`Suggested Next Step: ${nextStepForRisk(riskScore)}`);
+
+      const topPreds = getTopPredictions(report).slice(0, 3);
+      if (topPreds.length) {
+        y += 8;
+        addBlock("Top 3 Predictions:", 12, 8);
+        topPreds.forEach((p) => {
+          const label = normalizeLabel(p.label);
+          const desc = predictionDescription(p.label);
+          addBlock(`${label} — ${fmtPct(p.confidence)}`);
+          addBlock(`- ${desc}`, 10, 4);
+        });
+      }
+
+      const images = report.images || report.input?.images || [];
+      const imageData = images
+        .map((img) => ({
+          name: img.name || "Uploaded image",
+          src: img.dataUrl || img.url || img.src || img,
+        }))
+        .filter((img) => typeof img.src === "string" && img.src.startsWith("data:image/"));
+
+      if (imageData.length) {
+        doc.addPage();
+        y = 40;
+        doc.setFontSize(12);
+        doc.text("Uploaded Images", 40, y);
+        y += 16;
+
+        const maxWidth = pageWidth - 80;
+        const imgHeight = 160;
+
+        for (const img of imageData) {
+          if (y + imgHeight + 30 > pageHeight - 40) {
+            doc.addPage();
+            y = 40;
+          }
+          const isPng = img.src.startsWith("data:image/png");
+          doc.addImage(img.src, isPng ? "PNG" : "JPEG", 40, y, maxWidth, imgHeight);
+          y += imgHeight + 14;
+          addBlock(img.name, 10, 4);
+          y += 6;
+        }
+      }
+
+      const pdfBlob = doc.output("blob");
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `skinai_report_${report.id || "download"}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      alert("Failed to generate PDF. Please try again.");
+    }
   }
 
   return (
@@ -447,9 +339,19 @@ export default function Reports() {
             <span className="muted">
               {userEmail ? `Signed in as ${userEmail}` : ""}
             </span>
-            <button className="btn" style={{ marginLeft: 8 }} onClick={signOut}>
-              Sign out
-            </button>
+            {userEmail ? (
+              <button className="btn btn-cta" style={{ marginLeft: 8 }} onClick={signOut}>
+                Sign out
+              </button>
+            ) : (
+              <button
+                className="btn btn-cta"
+                style={{ marginLeft: 8 }}
+                onClick={() => navigate("/login?next=/reports")}
+              >
+                Log in
+              </button>
+            )}
           </div>
         </div>
 
@@ -484,163 +386,308 @@ export default function Reports() {
           </div>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
-            {reports.map((r) => {
-              const top = (r.topPredictions || []).slice(0, 3);
-              const top1 = top[0];
-              const top2 = top[1];
-              const uncertain = needsClinicianPrompt(top1, top2);
-
-              return (
-                <div key={r.id} className="card">
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div>
-                      <h3 style={{ margin: "0 0 4px 0" }}>
-                        {r.title || "SkinAI Analysis Report"}
-                      </h3>
-                      <div className="muted">Created: {fmtDate(r.createdAt)}</div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <Link className="btn" to="/upload">
-                        Analyze another
-                      </Link>
-                      <button className="btn" onClick={() => deleteReport(r.id)}>
-                        Delete
-                      </button>
+            {reports.map((r) => (
+              <div key={r.id} className="card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <h3 style={{ margin: "0 0 4px 0" }}>
+                      {r.input?.name || "Unnamed Report"}
+                    </h3>
+                    <div className="muted">
+                      Created: {fmtDate(r.createdAt)}
                     </div>
                   </div>
 
-                  {/* Images */}
-                  <div style={{ marginTop: 12 }}>
-                    <strong>Image(s)</strong>
-
-                    <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-                      {(r.images || []).map((img, idx) => {
-                        const key = img.imageId || img.filename || String(idx);
-                        const url =
-                          (img.imageId && imageUrls[img.imageId]) ||
-                          (img.filename && imageUrls[img.filename]) ||
-                          null;
-
-                        return (
-                          <div key={key} style={{ display: "grid", gap: 6 }}>
-                            <div className="muted" style={{ fontSize: 12 }}>
-                              {img.filename || img.imageId || "Image"}
-                            </div>
-
-                            {url ? (
-                              <img
-                                src={url}
-                                alt={img.filename || "Uploaded lesion"}
-                                style={{
-                                  width: "100%",
-                                  maxWidth: 520,
-                                  borderRadius: 12,
-                                  border: "1px solid #2a2a2a",
-                                }}
-                              />
-                            ) : (
-                              <div className="muted">Image not available yet.</div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <div>
+                    <Link className="btn btn-cta" to="/upload">
+                      Analyze another
+                    </Link>
                   </div>
+                </div>
 
-                  {/* Predictions */}
-                  <div style={{ marginTop: 14 }}>
-                    <strong>Top 3 predictions</strong>
+                {/* IMAGES */}
+                {((r.images || r.input?.images || []).length > 0) && (
+                  <div className="report-images">
+                    {(r.images || r.input?.images || []).map((img, idx) => {
+                      const src = img.dataUrl || img.url || img.src || img;
+                      const name = img.name || `Image ${idx + 1}`;
+                      if (!src) return null;
+                      return (
+                        <img
+                          key={name}
+                          className="report-image"
+                          src={src}
+                          alt={name}
+                          title={name}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
 
-                    {top.length === 0 ? (
-                      <p className="muted" style={{ marginTop: 6 }}>
-                        No predictions available yet. Backend analysis may still be
-                        in progress.
-                      </p>
-                    ) : (
-                      <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
-                        {top.map((p, i) => {
-                          const label =
-                            CLASS_LABELS[p.code] || p.label || p.code || "Unknown";
-                          const desc = CLASS_DESCRIPTIONS[p.code] || "";
-
-                          return (
-                            <div key={`${p.code || p.label}-${i}`}>
-                              <div>
-                                <strong>
-                                  {i + 1}. {label}
-                                </strong>{" "}
-                                <span className="muted">
-                                  — {fmtPct(p.confidence)}
-                                </span>
-                              </div>
-
-                              {desc && (
-                                <div className="muted" style={{ marginTop: 4 }}>
-                                  {desc}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
+                {/* PATIENT INTAKE INFORMATION */}
+                {r.input && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                    <strong style={{ display: "block", marginBottom: 8 }}>Patient Information</strong>
                     <div
                       style={{
-                        marginTop: 12,
-                        padding: 12,
-                        borderRadius: 12,
-                        border: "1px solid #3a3a3a",
-                        background: "#0f0f0f",
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                        gap: 8,
+                        fontSize: "0.9rem",
                       }}
                     >
-                      <div style={{ fontWeight: 800, marginBottom: 6 }}>
-                        Important medical note
-                      </div>
-
-                      <div className="muted">
-                        This output is generated by an AI model and is{" "}
-                        <strong>not</strong> a medical diagnosis. If the lesion is
-                        new, changing, painful, bleeding, or irregular, seek
-                        evaluation by a licensed clinician.
-                      </div>
-
-                      {uncertain && (
-                        <div className="muted" style={{ marginTop: 10 }}>
-                          <strong>Low confidence / uncertain:</strong> The model
-                          confidence is low or the top predictions are close. We
-                          recommend consulting a dermatologist for an accurate
-                          assessment.
+                      {r.input.user_email && (
+                        <div>
+                          <strong>Email:</strong> {r.input.user_email}
+                        </div>
+                      )}
+                      {r.input.name && (
+                        <div>
+                          <strong>Name:</strong> {r.input.name}
+                        </div>
+                      )}
+                      {r.input.age && (
+                        <div>
+                          <strong>Age:</strong> {r.input.age}
+                        </div>
+                      )}
+                      {r.input.patient_age && !r.input.age && (
+                        <div>
+                          <strong>Age:</strong> {r.input.patient_age}
+                        </div>
+                      )}
+                      {r.input.sex && (
+                        <div>
+                          <strong>Sex:</strong> {r.input.sex}
+                        </div>
+                      )}
+                      {r.input.skinType && (
+                        <div>
+                          <strong>Skin Type:</strong> {r.input.skinType}
+                        </div>
+                      )}
+                      {r.input.fitzpatrick && !r.input.skinType && (
+                        <div>
+                          <strong>Skin Type:</strong> {r.input.fitzpatrick}
+                        </div>
+                      )}
+                      {r.input.location && (
+                        <div>
+                          <strong>Location:</strong> {r.input.location}
+                        </div>
+                      )}
+                      {r.input.body_site && !r.input.location && (
+                        <div>
+                          <strong>Location:</strong> {r.input.body_site}
+                        </div>
+                      )}
+                      {r.input.duration_days && (
+                        <div>
+                          <strong>Duration:</strong> {r.input.duration_days} days
+                        </div>
+                      )}
+                      {r.input.duration_weeks && (
+                        <div>
+                          <strong>Duration:</strong> {r.input.duration_weeks} weeks
+                        </div>
+                      )}
+                      {r.input.diameter_mm && (
+                        <div>
+                          <strong>Diameter:</strong> {r.input.diameter_mm} mm
+                        </div>
+                      )}
+                      {r.input.bleeding != null && (
+                        <div>
+                          <strong>Bleeding:</strong> {String(r.input.bleeding)}
+                        </div>
+                      )}
+                      {r.input.crusting != null && (
+                        <div>
+                          <strong>Crusting:</strong> {String(r.input.crusting)}
+                        </div>
+                      )}
+                      {r.input.itching_0_10 != null && (
+                        <div>
+                          <strong>Itching (0-10):</strong> {r.input.itching_0_10}
+                        </div>
+                      )}
+                      {r.input.pain_0_10 != null && (
+                        <div>
+                          <strong>Pain (0-10):</strong> {r.input.pain_0_10}
+                        </div>
+                      )}
+                      {r.input.elevation && (
+                        <div>
+                          <strong>Elevation:</strong> {r.input.elevation}
+                        </div>
+                      )}
+                      {r.input.border_irregularity != null && (
+                        <div>
+                          <strong>Border irregularity:</strong> {r.input.border_irregularity}
+                        </div>
+                      )}
+                      {r.input.asymmetry != null && (
+                        <div>
+                          <strong>Asymmetry:</strong> {r.input.asymmetry}
+                        </div>
+                      )}
+                      {r.input.number_of_colors != null && (
+                        <div>
+                          <strong>Number of colors:</strong> {r.input.number_of_colors}
+                        </div>
+                      )}
+                      {r.input.color_variegation != null && (
+                        <div>
+                          <strong>Color variegation:</strong> {r.input.color_variegation}
+                        </div>
+                      )}
+                      {r.input.primarySymptoms && (
+                        <div>
+                          <strong>Primary Symptoms:</strong> {r.input.primarySymptoms}
+                        </div>
+                      )}
+                      {r.input.familyHistory && (
+                        <div>
+                          <strong>Family History:</strong> {r.input.familyHistory}
+                        </div>
+                      )}
+                      {r.input.sunExposure && (
+                        <div>
+                          <strong>Sun Exposure:</strong> {r.input.sunExposure}
+                        </div>
+                      )}
+                      {r.input.spfUse && (
+                        <div>
+                          <strong>SPF Use:</strong> {r.input.spfUse}
                         </div>
                       )}
                     </div>
+
+                    {(r.input.medicalBackground || r.input.currentMedications) && (
+                      <div style={{ marginTop: 8 }}>
+                        {r.input.medicalBackground && (
+                          <div style={{ marginBottom: 8 }}>
+                            <strong>Medical Background:</strong>
+                            <p style={{ margin: "4px 0 0 0", whiteSpace: "pre-wrap" }}>
+                              {r.input.medicalBackground}
+                            </p>
+                          </div>
+                        )}
+                        {r.input.currentMedications && (
+                          <div>
+                            <strong>Current Medications:</strong>
+                            <p style={{ margin: "4px 0 0 0", whiteSpace: "pre-wrap" }}>
+                              {r.input.currentMedications}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ANALYSIS RESULTS */}
+
+                <div style={{ marginTop: 10 }}>
+                  <strong>Primary Result</strong>
+                  <div style={{ marginTop: 6 }}>
+                    <span className="pill">
+                      {r.analysis?.risk_score || r.primary_result || "N/A"}
+                    </span>
                   </div>
 
-                  {/* Download */}
-                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                    <button
-                      className="btn btn-cta"
-                      onClick={() =>
-                        downloadHtmlReport({ report: r, imageUrls, userEmail })
-                      }
-                    >
-                      Download Report
-                    </button>
+                  <div style={{ marginTop: 22 }}>
+                    <strong style={{ color: "#4a9ff5" }}>Top 3 predictions</strong>
+                    <div className="report-predictions">
+                      {getTopPredictions(r)
+                        .slice(0, 3)
+                        .map((p, i) => (
+                          <div key={i} className="report-prediction">
+                            <div>
+                              <strong>{normalizeLabel(p.label)}</strong>
+                              <span className="report-prediction-score">
+                                {fmtPct(p.confidence ?? 0)}
+                              </span>
+                            </div>
+                            <div className="muted report-prediction-desc">
+                              {predictionDescription(p.label)}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   </div>
+
+                  <div className="report-next-step">
+                    <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
+                    <p className="muted" style={{ marginTop: 6 }}>
+                      {nextStepForRisk(r.analysis?.risk_score || r.primary_result)}
+                    </p>
+                  </div>
+
+                  <p className="muted" style={{ marginTop: 8 }}>
+                    {r.notes}
+                  </p>
                 </div>
-              );
-            })}
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    className="btn btn-cta"
+                    onClick={() => downloadReport(r)}
+                  >
+                    Download PDF
+                  </button>
+                  <button
+                    className="btn btn-cta"
+                    onClick={() => deleteReport(r.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>
+
+      {!userEmail && showLoginGate && (
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="reports-login-gate-title">
+          <div className="modal-content">
+            <h2 id="reports-login-gate-title">Login Required</h2>
+            <p>Must be logged in to view reports.</p>
+            <div className="modal-actions">
+              <button
+                className="btn btn-cta"
+                type="button"
+                onClick={() => navigate("/login?next=/reports")}
+              >
+                Log In
+              </button>
+              <button
+                className="btn btn-cta"
+                type="button"
+                onClick={() => navigate("/")}
+              >
+                Back Home
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

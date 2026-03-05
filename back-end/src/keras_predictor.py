@@ -8,7 +8,7 @@ from tensorflow.keras.applications.resnet50 import preprocess_input
 # MUST match training order
 CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
 
-MODEL_PATH = Path(__file__).parent / "models" / "resnet50_skin_disease_finetuned.keras"
+MODEL_PATH = Path(__file__).parent / "models" / "resnet50_skin_disease_finetuned_v4.keras"
 
 
 class KerasResNetPredictor:

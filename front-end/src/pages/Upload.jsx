@@ -2,77 +2,142 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "../styles/upload.css";
 
-/**
- * Shared report schema (stored in localStorage, WITHOUT previewUrl):
- * {
- *   id: string,
- *   createdAt: ISO string,
- *   title: string,
- *   images: [{ imageId?: string, filename: string }],
- *   topPredictions: [{ code?: string, label: string, confidence: number }],
- *   patientInfo?: object
- * }
- *
- * Preview URLs are stored in sessionStorage only:
- * sessionStorage["skinai_report_previews_<reportId>"] = JSON.stringify([{ filename, previewUrl }])
- */
+const LOGIN_GATE_DELAY_MS = 1000;
+const MAX_IMAGES = 20;
 
-function makeId() {
-  // crypto.randomUUID() is great but not universal in older environments
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
+// Use one API_BASE definition (fallback for local dev)
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
+
+/** Returns email/username or null */
+function getLoggedInUser() {
+  try {
+    const raw = (localStorage.getItem("skinai_user") || "").trim();
+    if (!raw || raw === "null" || raw === "undefined") return null;
+    return raw;
+  } catch {
+    return null;
   }
-  // fallback: reasonably unique
-  return `r_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Used for de-duping selected files
 function fileSig(f) {
-  // stable signature for matching previews to files (handles reordering better than idx)
-  return `${f.name}__${f.size}__${f.lastModified}`;
+  return `${f.name}|${f.size}|${f.lastModified}`;
+}
+
+const DISEASE_LABELS = {
+  akiec: "Actinic keratoses and intraepithelial carcinoma (Bowen disease)",
+  bcc: "Basal cell carcinoma",
+  bkl: "Benign keratosis (seborrheic keratosis, lichen planus-like keratosis)",
+  df: "Dermatofibroma",
+  mel: "Melanoma",
+  nv: "Melanocytic nevus",
+  vasc: "Vascular lesion (angioma, angiokeratoma, hemorrhage)",
+};
+
+const DISEASE_DESCRIPTIONS = {
+  akiec: "Precancerous, sun-related scaly lesions that can evolve over time.",
+  bcc: "Slow-growing skin cancer; often appears as a pearly or ulcerated bump.",
+  bkl: "Common, benign growths with a waxy or stuck-on appearance.",
+  df: "Benign, firm skin nodule, often on legs or arms.",
+  mel: "Potentially aggressive skin cancer; needs prompt evaluation.",
+  nv: "Common benign mole; usually stable in shape and color.",
+  vasc: "Benign blood-vessel lesion; may appear red, purple, or blue.",
+};
+
+function normalizeLabel(label) {
+  if (!label) return "Unknown";
+  const raw = String(label).trim();
+  const key = raw.toLowerCase();
+  if (DISEASE_LABELS[key]) return DISEASE_LABELS[key];
+  return raw;
+}
+
+function predictionDescription(label) {
+  if (!label) return "";
+  const key = String(label).trim().toLowerCase();
+  if (DISEASE_DESCRIPTIONS[key]) return DISEASE_DESCRIPTIONS[key];
+
+  const normalized = normalizeLabel(label).toLowerCase();
+  const matchKey = Object.keys(DISEASE_LABELS).find(
+    (abbr) => DISEASE_LABELS[abbr].toLowerCase() === normalized
+  );
+  if (matchKey && DISEASE_DESCRIPTIONS[matchKey]) return DISEASE_DESCRIPTIONS[matchKey];
+
+  return "Consider a clinician review to confirm and correlate clinically.";
+}
+
+function fmtPct(x) {
+  return (Number(x || 0) * 100).toFixed(1) + "%";
+}
+
+function nextStepForRisk(riskScore) {
+  const score = String(riskScore || "").toLowerCase();
+  if (score === "high_risk" || score === "high") return "Schedule an urgent dermatology visit and avoid delays.";
+  if (score === "moderate_risk" || score === "moderate") return "Book a dermatology appointment within the next few weeks.";
+  if (score === "low_risk" || score === "low") return "Monitor for changes and practice sun protection; see a clinician if it changes.";
+  return "Seek medical advice if you are concerned or notice changes.";
 }
 
 export default function Upload() {
-  const MAX_IMAGES = 20;
-  const fileInputRef = useRef(null);
   const navigate = useNavigate();
-
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-  // If API_BASE is "", fetch will hit same-origin (good when you have a dev proxy)
+  const fileInputRef = useRef(null);
 
   const [files, setFiles] = useState([]); // File[]
   const [previews, setPreviews] = useState([]); // { sig, name, url }[]
 
+  // IMPORTANT: your UI uses form.location + form.duration.
+  // Your earlier state had lesionLocation fields but the UI doesn't use them consistently.
   const [form, setForm] = useState({
     name: "",
     age: "",
     sex: "",
     skinType: "",
-    lesionLocation: "",
-    lesionLocationOther: "",
+    location: "",
     duration: "",
     primarySymptoms: [],
-    primarySymptomsOther: "",
-    medicalBackground: "", // yes | no | unsure
-    medicalBackgroundDetails: "",
-    familyHistory: "", // none | skincancer | melanoma | unsure
-    sunExposure: "", // low | moderate | high
-    spfUse: "", // never | sometimes | often | daily
-    medications: "",
+    medicalBackground: "",
+    familyHistory: "",
+    sunExposure: "",
+    spfUse: "",
+    currentMedications: "",
     consent: false,
   });
 
   const [formMsg, setFormMsg] = useState("");
-  const [result, setResult] = useState(null); // { success: bool, topPredictions?: [], message: string }
+  const [result, setResult] = useState(null); // { meta, raw, raw_full } or { success, topPredictions, message }
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Get logged-in user email
-  const userEmail = useMemo(() => {
-    try {
-      return localStorage.getItem("skinai_user");
-    } catch {
-      return null;
-    }
+  const [userEmail, setUserEmail] = useState(getLoggedInUser);
+  const [showLoginGate, setShowLoginGate] = useState(false);
+
+  useEffect(() => {
+    const syncUser = () => setUserEmail(getLoggedInUser());
+    syncUser();
+    window.addEventListener("storage", syncUser);
+    window.addEventListener("focus", syncUser);
+    return () => {
+      window.removeEventListener("storage", syncUser);
+      window.removeEventListener("focus", syncUser);
+    };
   }, []);
+
+  useEffect(() => {
+    if (userEmail) {
+      setShowLoginGate(false);
+      return;
+    }
+    const timerId = setTimeout(() => setShowLoginGate(true), LOGIN_GATE_DELAY_MS);
+    return () => clearTimeout(timerId);
+  }, [userEmail]);
 
   // Build object URLs for previews (and clean them up)
   useEffect(() => {
@@ -82,10 +147,7 @@ export default function Upload() {
       url: URL.createObjectURL(f),
     }));
     setPreviews(next);
-
-    return () => {
-      next.forEach((p) => URL.revokeObjectURL(p.url));
-    };
+    return () => next.forEach((p) => URL.revokeObjectURL(p.url));
   }, [files]);
 
   const canAnalyze = useMemo(() => {
@@ -94,9 +156,7 @@ export default function Upload() {
       String(form.age).trim() &&
       form.sex &&
       form.skinType &&
-      (form.lesionLocation === "Other"
-        ? form.lesionLocationOther.trim()
-        : form.lesionLocation) &&
+      form.location.trim() &&
       String(form.duration).trim();
 
     const hasSymptoms = form.primarySymptoms.length > 0;
@@ -105,6 +165,11 @@ export default function Upload() {
   }, [form, files]);
 
   function acceptFiles(fileList) {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      setFormMsg("Must be logged in to upload image.");
+      return;
+    }
     if (!fileList) return;
 
     const picked = Array.from(fileList).filter((f) =>
@@ -116,15 +181,15 @@ export default function Upload() {
       return;
     }
 
+    setFormMsg("");
     setResult(null);
 
     setFiles((prev) => {
-      const sig = (f) => fileSig(f);
-      const seen = new Set(prev.map(sig));
+      const seen = new Set(prev.map(fileSig));
       const merged = [...prev];
 
       for (const f of picked) {
-        const s = sig(f);
+        const s = fileSig(f);
         if (!seen.has(s)) {
           merged.push(f);
           seen.add(s);
@@ -135,15 +200,8 @@ export default function Upload() {
         setFormMsg(`You can upload up to ${MAX_IMAGES} images. Extra files were ignored.`);
         return merged.slice(0, MAX_IMAGES);
       }
-
-      setFormMsg("");
       return merged;
     });
-  }
-
-  function removeFileAt(index) {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-    setResult(null);
   }
 
   function onDrop(e) {
@@ -153,11 +211,30 @@ export default function Upload() {
   }
 
   function onBrowse() {
+    if (!userEmail) {
+      setShowLoginGate(true);
+      return;
+    }
     fileInputRef.current?.click();
+  }
+
+  function deleteImage(index) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setResult(null);
   }
 
   function updateField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setResult(null);
+  }
+
+  function toggleSymptom(symptom) {
+    setForm((prev) => ({
+      ...prev,
+      primarySymptoms: prev.primarySymptoms.includes(symptom)
+        ? prev.primarySymptoms.filter((s) => s !== symptom)
+        : [...prev.primarySymptoms, symptom],
+    }));
     setResult(null);
   }
 
@@ -171,48 +248,30 @@ export default function Upload() {
       age: "",
       sex: "",
       skinType: "",
-      lesionLocation: "",
-      lesionLocationOther: "",
+      location: "",
       duration: "",
       primarySymptoms: [],
-      primarySymptomsOther: "",
       medicalBackground: "",
-      medicalBackgroundDetails: "",
       familyHistory: "",
       sunExposure: "",
       spfUse: "",
-      medications: "",
+      currentMedications: "",
       consent: false,
     });
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function toggleSymptom(symptom) {
-    setForm((prev) => {
-      const has = prev.primarySymptoms.includes(symptom);
-      const next = has
-        ? prev.primarySymptoms.filter((s) => s !== symptom)
-        : [...prev.primarySymptoms, symptom];
-
-      return {
-        ...prev,
-        primarySymptoms: next,
-        primarySymptomsOther: next.includes("Other") ? prev.primarySymptomsOther : "",
-      };
-    });
-    setResult(null);
-  }
-
   async function handleSubmit(e) {
     e.preventDefault();
 
-    if (!canAnalyze) {
-      setFormMsg("Please complete required fields, consent, and add at least 1 image.");
+    if (!userEmail) {
+      setShowLoginGate(true);
+      setFormMsg("Must be logged in to upload image.");
       return;
     }
 
-    if (!userEmail) {
-      setFormMsg("You must be logged in to upload.");
+    if (!canAnalyze) {
+      setFormMsg("Please complete required fields, consent, and add at least 1 image.");
       return;
     }
 
@@ -220,133 +279,80 @@ export default function Upload() {
     setFormMsg("Uploading and analyzing...");
 
     try {
-      // Send all images and patient info in ONE request to backend.
-      // Backend contract: expects "images" (multipart array) and "patientInfo" (JSON string).
+      // One request containing many images (batch upload)
       const formData = new FormData();
       files.forEach((file) => formData.append("images", file));
 
-      const patientInfo = {
-        name: form.name,
-        age: form.age,
-        sex: form.sex,
-        skinType: form.skinType,
-        lesionLocation: form.lesionLocation,
-        lesionLocationOther: form.lesionLocationOther,
-        durationDays: form.duration,
-        primarySymptoms: form.primarySymptoms,
-        primarySymptomsOther: form.primarySymptomsOther,
-        medicalBackground: form.medicalBackground,
-        medicalBackgroundDetails: form.medicalBackgroundDetails,
-        familyHistory: form.familyHistory,
-        sunExposure: form.sunExposure,
-        spfUse: form.spfUse,
-        medications: form.medications,
-        uploadDate: new Date().toISOString(),
-      };
+      // Intake fields (keep aligned with your backend)
+      formData.append("name", form.name);
+      formData.append("age", String(form.age));
+      formData.append("sex", form.sex);
+      formData.append("skinType", form.skinType);
+      formData.append("location", form.location);
+      formData.append("duration_days", String(form.duration));
+      formData.append("primarySymptoms", form.primarySymptoms.join(", "));
+      formData.append("medicalBackground", form.medicalBackground);
+      formData.append("familyHistory", form.familyHistory);
+      formData.append("sunExposure", form.sunExposure);
+      formData.append("spfUse", form.spfUse);
+      formData.append("currentMedications", form.currentMedications);
+      formData.append("consent", String(form.consent));
+      formData.append("uploadDate", new Date().toISOString());
 
-      formData.append("patientInfo", JSON.stringify(patientInfo));
-
-      const response = await fetch(`${API_BASE}/api/upload`, {
+      const response = await fetch(`${API_BASE}/analyze_skin`, {
         method: "POST",
         body: formData,
-        credentials: "include",
       });
 
-      let data = null;
-      const contentType = response.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        data = await response.json();
-      }
-
       if (!response.ok) {
-        const msg = data?.error || `Upload failed (${response.status})`;
+        let msg = "Failed to analyze images.";
+        try {
+          const errJson = await response.json();
+          msg = errJson.error || errJson.message || msg;
+        } catch {}
         throw new Error(msg);
       }
 
-      // Backend response (suggested):
-      // { reportId, topPredictions, images?: [{imageId, filename}] }
-      const reportId = data?.reportId || makeId();
-      const topPredictions = Array.isArray(data?.topPredictions) ? data.topPredictions : [];
+      const data = await response.json();
 
-      // Store preview URLs in sessionStorage (NOT localStorage)
-      // to support immediate "Upload -> Reports" view without storing object URLs long-term.
-      try {
-        const previewPairs = files.map((f) => {
-          const sig = fileSig(f);
-          const p = previews.find((x) => x.sig === sig);
-          return {
-            filename: f.name,
-            previewUrl: p?.url || "",
-          };
-        });
-        sessionStorage.setItem(
-          `skinai_report_previews_${reportId}`,
-          JSON.stringify(previewPairs)
-        );
-      } catch {
-        // safe to ignore
-      }
+      // Minimal normalize into what your UI expects
+      const now = new Date();
+      const meta = `${files.length} image(s) analyzed • ${now.toLocaleString()}`;
 
-      // Build image array: prefer backend-provided imageIds; fallback is filename-only.
-      const images =
-        Array.isArray(data?.images) && data.images.length > 0
-          ? data.images.map((img) => ({
-              imageId: img.imageId,
-              filename: img.filename || img.imageId || "image",
-            }))
-          : files.map((f) => ({
-              filename: f.name,
-            }));
-
-      const report = {
-        id: reportId,
-        createdAt: new Date().toISOString(),
-        title: `Lesion Analysis — ${form.lesionLocation || "Unknown location"}`,
-        images,
-        topPredictions,
-        patientInfo: {
-          name: form.name,
-          age: form.age,
-          sex: form.sex,
-          skinType: form.skinType,
-          lesionLocation: form.lesionLocation,
-          lesionLocationOther: form.lesionLocationOther,
-          durationDays: form.duration,
+      setResult({
+        meta,
+        raw: {
+          primary_result: data?.risk_score ?? data?.primary_result ?? null,
         },
-      };
+        raw_full: data,
+      });
 
-      // Save report to localStorage (NO previewUrl here)
-      const storageKey = `skinai_reports_${userEmail}`;
+      setFormMsg(`✓ Analyzed ${files.length} image(s)`);
+
+      // Save lastAnalysis (best effort)
       try {
-        const existing = localStorage.getItem(storageKey);
-        const reports = existing ? JSON.parse(existing) : [];
-        reports.unshift(report);
-        localStorage.setItem(storageKey, JSON.stringify(reports));
-      } catch (err) {
-        console.error("Failed to save report to localStorage:", err);
-      }
+        const images = await Promise.all(
+          files.map(async (file) => ({
+            name: file.name,
+            dataUrl: await readFileAsDataUrl(file),
+          }))
+        );
 
-      // Show success result
-      if (topPredictions.length > 0) {
-        setResult({
-          success: true,
-          topPredictions,
-          message: `✓ Analysis complete. Showing top 3 predictions for ${files.length} image(s).`,
-        });
-      } else {
-        setResult({
-          success: true,
-          topPredictions: [],
-          message: `✓ Uploaded ${files.length} image(s). Backend analysis may still be processing.`,
-        });
-      }
+        const last = {
+          id: "report_" + Date.now(),
+          createdAt: new Date().toISOString(),
+          meta,
+          user_email: userEmail,
+          analysis: data,
+          images,
+          input: { ...form, user_email: userEmail },
+        };
 
-      setFormMsg("");
+        localStorage.setItem("lastAnalysis", JSON.stringify(last));
+      } catch {}
 
-      // Navigate to Reports page after short delay so user sees success status
-      setTimeout(() => {
-        navigate("/reports");
-      }, 900);
+      // Go to reports
+      setTimeout(() => navigate("/reports"), 900);
     } catch (error) {
       console.error("Upload error:", error);
       setFormMsg(`Error: ${error.message}`);
@@ -357,390 +363,444 @@ export default function Upload() {
   }
 
   return (
-    <main className="container narrow">
-      <section className="section-pad">
-        <h1 className="h-title">Upload</h1>
-        <p className="muted">Drag and drop JPG/PNG files or click to browse.</p>
+    <>
+      <main className="container narrow">
+        <section className="section-pad">
+          <h1 className="h-title">Upload</h1>
+          <p className="muted">Drag and drop JPG/PNG files or click to browse.</p>
 
-        {/* DROPZONE */}
-        <div
-          id="dz"
-          className="dropzone card"
-          tabIndex={0}
-          role="button"
-          aria-label="Upload images dropzone"
-          onClick={onBrowse}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
+          {/* DROPZONE */}
+          <div
+            id="dz"
+            className="dropzone card"
+            tabIndex={0}
+            role="button"
+            aria-label="Upload images dropzone"
+            onClick={onBrowse}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onBrowse();
+              }
+            }}
+            onDragEnter={(e) => {
               e.preventDefault();
-              onBrowse();
-            }
-          }}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDrop={onDrop}
-        >
-          <div style={{ fontSize: "2rem" }}>⬆️</div>
-          <p className="dz-title" style={{ fontWeight: 700 }}>
-            Drag &amp; drop your images here
-          </p>
-          <p className="dz-sub" style={{ color: "var(--muted)" }}>
-            or click to browse
-          </p>
-
-          <label
-            className="file-btn"
-            style={{ marginTop: 10 }}
-            onClick={(e) => e.stopPropagation()}
+              e.stopPropagation();
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={onDrop}
           >
-            Choose File
-            <input
-              ref={fileInputRef}
-              id="fileInput"
-              type="file"
-              accept="image/jpeg,image/png"
-              multiple
-              onChange={(e) => acceptFiles(e.target.files)}
-            />
-          </label>
+            <p className="dz-title" style={{ fontWeight: 700 }}>
+              Drag &amp; drop your images here
+            </p>
+            <p className="dz-sub" style={{ color: "var(--muted)" }}>
+              or click to browse
+            </p>
 
-          <p className="q-hint">Tip: Upload multiple images for comparison.</p>
-        </div>
+            <div style={{ fontSize: "2.5rem", margin: "12px 0", animation: "bounce 2s infinite" }}>
+              ⬆️
+            </div>
 
-        {/* PREVIEW */}
-        <div className="preview-header" style={{ marginTop: 16 }}>
-          <p className="muted" style={{ margin: 0 }}>
-            Selected images: <strong>{files.length}</strong> / {MAX_IMAGES}
-          </p>
-        </div>
+            <label
+              className="file-btn"
+              style={{ marginTop: 10, backgroundColor: "#4CAF50", borderColor: "#388E3C" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Choose File
+              <input
+                ref={fileInputRef}
+                id="fileInput"
+                type="file"
+                accept="image/jpeg,image/png"
+                multiple
+                onChange={(e) => acceptFiles(e.target.files)}
+              />
+            </label>
 
-        <div id="preview" className="preview preview-scroller" aria-label="Selected image previews">
-          <div className="preview-grid">
-            {previews.map((p, idx) => (
-              <div key={p.url} className="preview-item">
-                <button
-                  type="button"
-                  className="preview-remove"
-                  aria-label={`Remove ${p.name}`}
-                  onClick={() => removeFileAt(idx)}
-                >
-                  ×
-                </button>
-                <img src={p.url} alt={`Preview: ${p.name}`} />
-                <div className="preview-name" title={p.name}>
-                  {p.name}
-                </div>
-              </div>
-            ))}
+            <p className="q-hint">Tip: Upload multiple images for comparison.</p>
+            <p className="q-hint">Max {MAX_IMAGES} images</p>
           </div>
-        </div>
 
-        {/* FORM */}
-        <form id="intakeForm" className="card" onSubmit={handleSubmit}>
-          <h2 className="h-title" style={{ fontSize: "1.25rem" }}>
-            Patient Intake
-          </h2>
-          <p className="section-sub">
-            Required fields marked with <span className="req">*</span>
-          </p>
-
-          <div className="q-grid">
-            <div className="q-card">
-              <label className="q-label">
-                Full Name <span className="req">*</span>
-              </label>
-              <input
-                className="q-input"
-                value={form.name}
-                onChange={(e) => updateField("name", e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="q-card">
-              <label className="q-label">
-                Age <span className="req">*</span>
-              </label>
-              <input
-                className="q-input"
-                type="number"
-                min="0"
-                max="120"
-                value={form.age}
-                onChange={(e) => updateField("age", e.target.value)}
-                required
-              />
-              <p className="q-hint">Enter your age in years.</p>
-            </div>
-
-            <div className="q-card">
-              <label className="q-label">
-                Sex <span className="req">*</span>
-              </label>
-              <select
-                className="q-select"
-                value={form.sex}
-                onChange={(e) => updateField("sex", e.target.value)}
-                required
+          {/* PREVIEW */}
+          <div
+            id="preview"
+            className="preview-container"
+            style={{
+              marginTop: 16,
+              maxHeight: 300,
+              overflow: "auto",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              padding: previews.length > 0 ? 12 : 0,
+              backgroundColor: previews.length > 0 ? "var(--bg-alt)" : "transparent",
+            }}
+          >
+            {previews.length === 0 ? (
+              <p className="muted" style={{ textAlign: "center", padding: 12 }}>
+                No images selected yet
+              </p>
+            ) : (
+              <div
+                className="preview"
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                }}
               >
-                <option value="">Select...</option>
-                <option>Female</option>
-                <option>Male</option>
-              </select>
-            </div>
+                {previews.map((p, idx) => (
+                  <div
+                    key={p.url}
+                    className="preview-item"
+                    style={{
+                      position: "relative",
+                      overflow: "hidden",
+                      borderRadius: "var(--radius)",
+                      backgroundColor: "white",
+                    }}
+                  >
+                    <img
+                      src={p.url}
+                      alt={`Preview: ${p.name}`}
+                      style={{
+                        width: "100%",
+                        height: "150px",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        backgroundColor: "rgba(0,0,0,0.7)",
+                        color: "white",
+                        padding: "4px 6px",
+                        fontSize: "0.75rem",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={p.name}
+                    >
+                      {p.name}
+                    </div>
+                    <button
+                      type="button"
+                      className="preview-delete-btn"
+                      onClick={() => deleteImage(idx)}
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        right: 4,
+                        backgroundColor: "rgba(255, 59, 48, 0.9)",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "50%",
+                        width: 28,
+                        height: 28,
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        fontSize: "1.2rem",
+                        fontWeight: "bold",
+                      }}
+                      aria-label={`Delete ${p.name}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-            <div className="q-card">
-              <label className="q-label">
-                Skin Type <span className="req">*</span>
-              </label>
-              <select
-                className="q-select"
-                value={form.skinType}
-                onChange={(e) => updateField("skinType", e.target.value)}
-                required
-              >
-                <option value="">Select...</option>
-                <option value="I">I — Very fair</option>
-                <option value="II">II — Fair</option>
-                <option value="III">III — Medium</option>
-                <option value="IV">IV — Olive</option>
-                <option value="V">V — Brown</option>
-                <option value="VI">VI — Dark brown</option>
-              </select>
-            </div>
+          {/* FORM */}
+          <form id="intakeForm" className="card" onSubmit={handleSubmit}>
+            <h2 className="h-title" style={{ fontSize: "1.25rem" }}>
+              Patient Intake
+            </h2>
+            <p className="section-sub">
+              Required fields marked with <span className="req">*</span>
+            </p>
 
-            <div className="q-card">
-              <label className="q-label">
-                Location of Lesion <span className="req">*</span>
-              </label>
-              <select
-                className="q-select"
-                value={form.lesionLocation}
-                onChange={(e) => updateField("lesionLocation", e.target.value)}
-                required
-              >
-                <option value="">Select...</option>
-                <option>Face / Neck</option>
-                <option>Scalp</option>
-                <option>Chest</option>
-                <option>Back</option>
-                <option>Abdomen</option>
-                <option>Arms / Hands</option>
-                <option>Legs / Feet</option>
-                <option>Other</option>
-              </select>
-
-              {form.lesionLocation === "Other" && (
+            <div className="q-grid">
+              <div className="q-card">
+                <label className="q-label">
+                  Full Name <span className="req">*</span>
+                </label>
                 <input
                   className="q-input"
-                  style={{ marginTop: 10 }}
-                  placeholder="Describe location"
-                  value={form.lesionLocationOther}
-                  onChange={(e) => updateField("lesionLocationOther", e.target.value)}
+                  value={form.name}
+                  onChange={(e) => updateField("name", e.target.value)}
                   required
                 />
-              )}
-            </div>
-
-            <div className="q-card">
-              <label className="q-label">
-                Duration (days) <span className="req">*</span>
-              </label>
-              <input
-                className="q-input"
-                type="number"
-                min="0"
-                max="3650"
-                value={form.duration}
-                onChange={(e) => updateField("duration", e.target.value)}
-                required
-              />
-            </div>
-
-            {/* Primary symptoms checkboxes */}
-            <div className="q-card" style={{ gridColumn: "1 / -1" }}>
-              <label className="q-label">
-                Primary Symptoms <span className="req">*</span>
-              </label>
-
-              <div className="checkbox-grid" role="group" aria-label="Primary symptoms">
-                {[
-                  "Itching",
-                  "Pain",
-                  "Bleeding",
-                  "Crusting",
-                  "Color change",
-                  "Size change",
-                  "Irregular border",
-                  "New lesion",
-                  "Other",
-                ].map((sym) => (
-                  <label key={sym} className="checkbox-item">
-                    <input
-                      type="checkbox"
-                      checked={form.primarySymptoms.includes(sym)}
-                      onChange={() => toggleSymptom(sym)}
-                    />
-                    <span>{sym}</span>
-                  </label>
-                ))}
               </div>
 
-              {form.primarySymptoms.includes("Other") && (
+              <div className="q-card">
+                <label className="q-label">
+                  Age <span className="req">*</span>
+                </label>
                 <input
                   className="q-input"
-                  style={{ marginTop: 10 }}
-                  placeholder="Other symptoms (optional)"
-                  value={form.primarySymptomsOther}
-                  onChange={(e) => updateField("primarySymptomsOther", e.target.value)}
+                  type="number"
+                  min="0"
+                  max="120"
+                  value={form.age}
+                  onChange={(e) => updateField("age", e.target.value)}
+                  required
                 />
-              )}
-            </div>
+              </div>
 
-            <div className="q-card" style={{ gridColumn: "1 / -1" }}>
-              <label className="q-label">Medical Background</label>
-              <select
-                className="q-select"
-                value={form.medicalBackground}
-                onChange={(e) => updateField("medicalBackground", e.target.value)}
-              >
-                <option value="">Select...</option>
-                <option value="no">No relevant history</option>
-                <option value="yes">Yes</option>
-                <option value="unsure">Not sure</option>
-              </select>
+              <div className="q-card">
+                <label className="q-label">
+                  Sex <span className="req">*</span>
+                </label>
+                <select
+                  className="q-select"
+                  value={form.sex}
+                  onChange={(e) => updateField("sex", e.target.value)}
+                  required
+                >
+                  <option value="">Select...</option>
+                  <option>Female</option>
+                  <option>Male</option>
+                  <option>Intersex</option>
+                </select>
+              </div>
 
-              {form.medicalBackground === "yes" && (
-                <textarea
-                  className="q-textarea"
-                  style={{ marginTop: 10 }}
-                  placeholder="Briefly describe"
-                  value={form.medicalBackgroundDetails}
-                  onChange={(e) => updateField("medicalBackgroundDetails", e.target.value)}
-                />
-              )}
-            </div>
+              <div className="q-card">
+                <label className="q-label">
+                  Skin Condition <span className="req">*</span>
+                </label>
+                <select
+                  className="q-select"
+                  value={form.skinType}
+                  onChange={(e) => updateField("skinType", e.target.value)}
+                  required
+                >
+                  <option value="">Select...</option>
+                  <option value="I">I — Very fair</option>
+                  <option value="II">II — Fair</option>
+                  <option value="III">III — Medium</option>
+                  <option value="IV">IV — Olive</option>
+                  <option value="V">V — Brown</option>
+                  <option value="VI">VI — Dark brown</option>
+                </select>
+              </div>
 
-            <div className="q-card">
-              <label className="q-label">Family history</label>
-              <select
-                className="q-select"
-                value={form.familyHistory}
-                onChange={(e) => updateField("familyHistory", e.target.value)}
-              >
-                <option value="">Select...</option>
-                <option value="none">None</option>
-                <option value="skincancer">Skin cancer</option>
-                <option value="melanoma">Melanoma</option>
-                <option value="unsure">Not sure</option>
-              </select>
-            </div>
-
-            <div className="q-card">
-              <label className="q-label">Sun exposure</label>
-              <select
-                className="q-select"
-                value={form.sunExposure}
-                onChange={(e) => updateField("sunExposure", e.target.value)}
-              >
-                <option value="">Select...</option>
-                <option value="low">Low</option>
-                <option value="moderate">Moderate</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-
-            <div className="q-card">
-              <label className="q-label">SPF use</label>
-              <select
-                className="q-select"
-                value={form.spfUse}
-                onChange={(e) => updateField("spfUse", e.target.value)}
-              >
-                <option value="">Select...</option>
-                <option value="never">Never</option>
-                <option value="sometimes">Sometimes</option>
-                <option value="often">Often</option>
-                <option value="daily">Daily</option>
-              </select>
-            </div>
-
-            <div className="q-card" style={{ gridColumn: "1 / -1" }}>
-              <label className="q-label">Current medications</label>
-              <textarea
-                className="q-textarea"
-                placeholder="List medications (optional)"
-                value={form.medications}
-                onChange={(e) => updateField("medications", e.target.value)}
-              />
-            </div>
-
-            <div className="q-card" style={{ gridColumn: "1 / -1" }}>
-              <label>
+              <div className="q-card">
+                <label className="q-label">
+                  Location <span className="req">*</span>
+                </label>
                 <input
-                  id="consent"
-                  type="checkbox"
-                  checked={form.consent}
-                  onChange={(e) => updateField("consent", e.target.checked)}
-                />{" "}
-                I confirm this image is mine and consent to analysis.
-                <span className="req">*</span>
-              </label>
+                  className="q-input"
+                  value={form.location}
+                  onChange={(e) => updateField("location", e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">
+                  Duration (days) <span className="req">*</span>
+                </label>
+                <input
+                  className="q-input"
+                  type="number"
+                  min="0"
+                  max="3650"
+                  value={form.duration}
+                  onChange={(e) => updateField("duration", e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label className="q-label">Primary Symptoms</label>
+                <div className="checkbox-grid">
+                  {["Itching", "Bleeding", "Pain", "Rapid change", "Discoloration", "Other"].map((symptom) => (
+                    <label key={symptom} className="checkbox-item">
+                      <input
+                        type="checkbox"
+                        checked={form.primarySymptoms.includes(symptom)}
+                        onChange={() => toggleSymptom(symptom)}
+                      />
+                      {symptom}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label className="q-label">Medical Background</label>
+                <textarea
+                  className="q-input"
+                  value={form.medicalBackground}
+                  onChange={(e) => updateField("medicalBackground", e.target.value)}
+                  placeholder="List relevant medical conditions, treatments, or procedures..."
+                  style={{ minHeight: 80, resize: "vertical" }}
+                />
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">Family History</label>
+                <select
+                  className="q-select"
+                  value={form.familyHistory}
+                  onChange={(e) => updateField("familyHistory", e.target.value)}
+                >
+                  <option value="">Select...</option>
+                  <option>Skin cancer in family</option>
+                  <option>Melanoma in family</option>
+                  <option>Both skin cancer and melanoma</option>
+                  <option>No family history</option>
+                  <option>Unknown</option>
+                </select>
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">Sun Exposure</label>
+                <select
+                  className="q-select"
+                  value={form.sunExposure}
+                  onChange={(e) => updateField("sunExposure", e.target.value)}
+                >
+                  <option value="">Select...</option>
+                  <option>Minimal</option>
+                  <option>Moderate</option>
+                  <option>High</option>
+                  <option>Very high (outdoor work)</option>
+                  <option>History of severe sunburns</option>
+                </select>
+              </div>
+
+              <div className="q-card">
+                <label className="q-label">SPF Use</label>
+                <select
+                  className="q-select"
+                  value={form.spfUse}
+                  onChange={(e) => updateField("spfUse", e.target.value)}
+                >
+                  <option value="">Select...</option>
+                  <option>Never</option>
+                  <option>Rarely</option>
+                  <option>Sometimes</option>
+                  <option>Usually</option>
+                  <option>Always</option>
+                </select>
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label className="q-label">Current Medications</label>
+                <textarea
+                  className="q-input"
+                  value={form.currentMedications}
+                  onChange={(e) => updateField("currentMedications", e.target.value)}
+                  placeholder="List current medications, supplements, or treatments..."
+                  style={{ minHeight: 80, resize: "vertical" }}
+                />
+              </div>
+
+              <div className="q-card" style={{ gridColumn: "1 / -1" }}>
+                <label>
+                  <input
+                    id="consent"
+                    type="checkbox"
+                    checked={form.consent}
+                    onChange={(e) => updateField("consent", e.target.checked)}
+                  />{" "}
+                  I confirm this image is mine and consent to analysis.
+                  <span className="req">*</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button className="btn btn-cta" type="submit" disabled={!canAnalyze || isSubmitting}>
+                {isSubmitting ? "Analyzing..." : "Analyze"}
+              </button>
+
+              <button type="button" className="btn btn-secondary" onClick={clearAll} disabled={isSubmitting}>
+                Clear
+              </button>
+
+              <span id="formMsg" className="q-hint">
+                {formMsg}
+              </span>
+            </div>
+          </form>
+
+          {/* RESULTS */}
+          <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
+            <h2 style={{ fontSize: "1.25rem", marginBottom: 12 }}>Preliminary Analysis</h2>
+            <p className="muted" style={{ marginBottom: 16 }}>{result?.meta || ""}</p>
+
+            {result?.raw && (
+              <>
+                <div style={{ marginTop: 10 }}>
+                  <strong>Primary Result</strong>
+                  <div style={{ marginTop: 6 }}>
+                    <span className="pill">{result.raw.primary_result ?? "N/A"}</span>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 22 }}>
+                  <strong style={{ color: "#4a9ff5" }}>Top 3 predictions</strong>
+                  <div className="report-predictions">
+                    {(result.raw_full?.top_predictions || result.raw_full?.model_topk || [])
+                      .slice(0, 3)
+                      .map((p, i) => {
+                        const label = p.label || p.name || "Unknown";
+                        const confidence = p.confidence ?? p.prob ?? 0;
+                        return (
+                          <div key={i} className="report-prediction">
+                            <div>
+                              <strong>{normalizeLabel(label)}</strong>
+                              <span className="report-prediction-score">{fmtPct(confidence)}</span>
+                            </div>
+                            <div className="muted report-prediction-desc">{predictionDescription(label)}</div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                <div className="report-next-step">
+                  <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
+                  <p className="muted" style={{ marginTop: 6 }}>
+                    {nextStepForRisk(result.raw.primary_result)}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+      </main>
+
+      {!userEmail && showLoginGate && (
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="upload-login-gate-title">
+          <div className="modal-content">
+            <h2 id="upload-login-gate-title">Login Required</h2>
+            <p>Must be logged in to upload image.</p>
+            <div className="modal-actions">
+              <button className="btn btn-cta" type="button" onClick={() => navigate("/login?next=/upload")}>
+                Log In
+              </button>
+              <button className="btn btn-secondary" type="button" onClick={() => navigate("/")}>
+                Back Home
+              </button>
             </div>
           </div>
-
-          <div className="form-actions">
-            <button className="btn btn-cta" type="submit" disabled={!canAnalyze || isSubmitting}>
-              {isSubmitting ? "Uploading..." : "Analyze"}
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={clearAll}
-              disabled={isSubmitting}
-            >
-              Clear
-            </button>
-
-            <span id="formMsg" className="q-hint">
-              {formMsg}
-            </span>
-          </div>
-        </form>
-
-        {/* RESULTS */}
-        <div id="resultCard" className={`card result ${result ? "show" : ""}`}>
-          <h3>Analysis Results</h3>
-          <p id="resultMeta" className="muted">
-            {result?.message || ""}
-          </p>
-
-          {result?.success && result?.topPredictions?.length > 0 ? (
-            <div id="resultPredictions" style={{ marginTop: 12 }}>
-              <strong>Top 3 Predictions:</strong>
-              <ul style={{ margin: "8px 0 0 20px" }}>
-                {result.topPredictions.slice(0, 3).map((p, i) => (
-                  <li key={i}>
-                    <strong>{p.label || p.code}</strong> —{" "}
-                    {typeof p.confidence === "number" ? `${(p.confidence * 100).toFixed(1)}%` : ""}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : result?.success ? (
-            <p className="muted" style={{ marginTop: 8 }}>
-              Backend processing your images. Check Reports to see results once analysis is complete.
-            </p>
-          ) : null}
         </div>
-      </section>
-    </main>
+      )}
+    </>
   );
 }
