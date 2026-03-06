@@ -344,6 +344,67 @@ export default function Upload() {
       const first = results[0];
       if (!first) throw new Error("No analysis results returned.");
 
+      const healthInfoPayload = {
+        patientEmail: userEmail,
+        source: "upload-page",
+        healthInfo: {
+          name: form.name,
+          age: form.age,
+          sex: form.sex,
+          skinType: form.skinType,
+          location: form.location,
+          duration_days: form.duration,
+          primarySymptoms: form.primarySymptoms,
+          medicalBackground: form.medicalBackground,
+          familyHistory: form.familyHistory,
+          sunExposure: form.sunExposure,
+          spfUse: form.spfUse,
+          currentMedications: form.currentMedications,
+          consent: form.consent,
+        },
+        analysisMeta: {
+          uploadCount: results.length,
+          topPrediction: first.top_predictions?.[0]?.label || null,
+          riskScore: first.risk_score || null,
+          analyzedAt: new Date().toISOString(),
+        },
+      };
+
+      try {
+        const healthSaveTargets = [
+          `${API_BASE}/api/health-info`,
+          "/api/health-info",
+        ];
+        let healthSaved = false;
+        let lastHealthSaveError = "";
+
+        for (const target of healthSaveTargets) {
+          try {
+            const response = await fetch(target, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(healthInfoPayload),
+            });
+
+            if (response.ok) {
+              healthSaved = true;
+              break;
+            }
+
+            const errText = await response.text();
+            lastHealthSaveError = `${target} -> ${response.status} ${errText}`;
+          } catch (targetError) {
+            lastHealthSaveError = `${target} -> ${targetError?.message || "request failed"}`;
+          }
+        }
+
+        if (!healthSaved) {
+          console.warn("Could not save patient health info", lastHealthSaveError);
+        }
+      } catch (saveHealthInfoError) {
+        console.warn("Could not save patient health info", saveHealthInfoError);
+      }
+
       // If backend returned the seeded assistant explanation, dispatch it into the chat widget
       try {
         const seedText = first.assistant_seed || first.explanation_summary?.text || "";
@@ -501,12 +562,37 @@ export default function Upload() {
         };
         localStorage.setItem("lastAnalysis", JSON.stringify(last));
 
-        // Send to backend reports/save (best-effort)
-        fetch(`${API_BASE}/reports/save`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(last),
-        }).catch((err) => console.warn("reports/save failed", err));
+        const reportSaveTargets = [
+          `${API_BASE}/reports/save`,
+          "/api/reports/save",
+          "/reports/save",
+        ];
+        let reportSaved = false;
+        let lastReportSaveError = "";
+
+        for (const target of reportSaveTargets) {
+          try {
+            const response = await fetch(target, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(last),
+            });
+
+            if (response.ok) {
+              reportSaved = true;
+              break;
+            }
+
+            const errText = await response.text();
+            lastReportSaveError = `${target} -> ${response.status} ${errText}`;
+          } catch (targetError) {
+            lastReportSaveError = `${target} -> ${targetError?.message || "request failed"}`;
+          }
+        }
+
+        if (!reportSaved) {
+          console.warn("reports/save failed", lastReportSaveError);
+        }
       } catch (e) {
         console.warn("Could not save lastAnalysis", e);
       }
