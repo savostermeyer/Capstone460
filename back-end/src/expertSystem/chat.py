@@ -78,10 +78,35 @@ def _is_rate_limit_error(message: str) -> bool:
     )
 
 
+def _is_transient_network_error(message: str) -> bool:
+    msg = (message or "").lower()
+    return any(
+        token in msg
+        for token in (
+            "timed out",
+            "timeout",
+            "connection reset",
+            "connection aborted",
+            "connection refused",
+            "temporarily unavailable",
+            "temporary failure",
+            "name resolution",
+            "dns",
+            "503",
+            "504",
+            "502",
+            "internal server error",
+            "service unavailable",
+            "bad gateway",
+            "gateway timeout",
+        )
+    )
+
+
 def _retry_api_call(fn, *args, max_retries: int = 4, base_delay: float = 1.0):
     """
-    Call `fn(*args)` with exponential backoff retry for transient rate-limit/resource errors.
-    Retries when exception message contains 429 / Resource exhausted / rate limit.
+    Call `fn(*args)` with exponential backoff for transient transport/server failures.
+    Do NOT retry explicit quota/rate-limit errors (429/resource exhausted).
     """
     last_err = None
     for attempt in range(1, max_retries + 1):
@@ -90,11 +115,18 @@ def _retry_api_call(fn, *args, max_retries: int = 4, base_delay: float = 1.0):
         except Exception as e:
             last_err = e
             msg = str(e) or ""
-            is_rate = _is_rate_limit_error(msg)
-            if not is_rate:
+
+            # Fail fast on quota/rate-limit errors to avoid wasting requests.
+            if _is_rate_limit_error(msg):
                 raise
+
+            # Retry only network/transient backend failures.
+            if not _is_transient_network_error(msg):
+                raise
+
             if attempt == max_retries:
                 raise
+
             delay = base_delay * (2 ** (attempt - 1))
             print(f"[retry] attempt {attempt} failed: {msg[:180]} -- sleeping {delay}s")
             time.sleep(delay)
