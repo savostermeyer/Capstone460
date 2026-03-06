@@ -2,6 +2,7 @@ const express = require("express");
 const { MongoClient } = require("mongodb");
 const multer = require("multer");
 const path = require("path");
+const dns = require("dns");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const bcrypt = require("bcrypt");
 require("dotenv").config();
@@ -9,8 +10,23 @@ require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+if (process.env.NODE_DNS_SERVERS) {
+  const dnsServers = process.env.NODE_DNS_SERVERS.split(",")
+    .map((server) => server.trim())
+    .filter(Boolean);
+  if (dnsServers.length > 0) {
+    try {
+      dns.setServers(dnsServers);
+      console.log("Using custom DNS servers:", dnsServers.join(", "));
+    } catch (error) {
+      console.warn("Failed to set custom DNS servers:", error.message);
+    }
+  }
+}
+
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+const genAI = new GoogleGenerativeAI(geminiApiKey);
 const model = genAI.getGenerativeModel({
   model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
 });

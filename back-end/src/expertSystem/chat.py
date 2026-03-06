@@ -62,6 +62,22 @@ def _resp_text(resp) -> str:
     return (getattr(resp, "text", None) or "").strip()
 
 
+def _is_rate_limit_error(message: str) -> bool:
+    msg = (message or "").lower()
+    return any(
+        token in msg
+        for token in (
+            "429",
+            "resource exhausted",
+            "rate limit",
+            "quota exceeded",
+            "exceeded your current quota",
+            "generativelanguage.googleapis.com",
+            "free_tier",
+        )
+    )
+
+
 def _retry_api_call(fn, *args, max_retries: int = 4, base_delay: float = 1.0):
     """
     Call `fn(*args)` with exponential backoff retry for transient rate-limit/resource errors.
@@ -74,7 +90,7 @@ def _retry_api_call(fn, *args, max_retries: int = 4, base_delay: float = 1.0):
         except Exception as e:
             last_err = e
             msg = str(e) or ""
-            is_rate = ("429" in msg) or ("resource exhausted" in msg.lower()) or ("rate limit" in msg.lower())
+            is_rate = _is_rate_limit_error(msg)
             if not is_rate:
                 raise
             if attempt == max_retries:
@@ -620,17 +636,27 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
         initial = _retry_api_call(chat.send_message, user_text or "")
     except Exception as e:
         msg = str(e)
-        if "429" in msg or "Resource exhausted" in msg or "rate limit" in msg.lower():
+        is_rate_limit = _is_rate_limit_error(msg)
+        if is_rate_limit:
             print(f"[step] 429 Rate limit detected after retries: {msg[:200]}")
+            user_reply = (
+                "The AI service is temporarily busy due to usage limits. "
+                "Please try again in a minute, or reset chat to continue with a shorter context."
+            )
+            assistant_hint = "[Service busy - try again soon]"
+        else:
+            user_reply = (
+                "The assistant is temporarily unavailable. "
+                "Please try again shortly."
+            )
+            assistant_hint = "[Service unavailable]"
         return {
-            "reply": f"Model error: {e}\n"
-                     "Try setting GEMINI_MODEL to a supported name (e.g., "
-                     "gemini-2.0-flash, gemini-1.5-flash-8b, or gemini-1.5-pro).",
-            "message": str(e),
-            "assistant": "[Error - please retry]",
-            "text": str(e),
-            "error": str(e),
-            "error_code": "RATE_LIMIT" if ("429" in msg or "resource exhausted" in msg.lower()) else "MODEL_ERROR",
+            "reply": user_reply,
+            "message": "Service overloaded (429)" if is_rate_limit else "Model service error",
+            "assistant": assistant_hint,
+            "text": user_reply,
+            "error": "RATE_LIMIT" if is_rate_limit else "MODEL_ERROR",
+            "error_code": "RATE_LIMIT" if is_rate_limit else "MODEL_ERROR",
         }
 
     # 2) tool call handling
