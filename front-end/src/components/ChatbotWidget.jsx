@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const STORAGE_HISTORY = "skinai_chat_history";
+const STORAGE_HISTORY_PREFIX = "skinai_chat_history_";
 const STORAGE_OPEN = "skinai_chat_open";
 const STORAGE_SID = "skinai_sid";
 console.log("🔥 ChatbotWidget loaded from:", import.meta.url);
+const historyKey = `${STORAGE_HISTORY_PREFIX}${sid}`;
 
 function newSid() {
   return "sid_" + Math.random().toString(36).substring(2);
@@ -43,7 +44,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
   // History (persisted)
   const [messages, setMessages] = useState(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_HISTORY);
+      const raw = localStorage.getItem(historyKey);
       const parsed = raw ? JSON.parse(raw) : [];
       if (parsed.length === 0) {
         return [
@@ -80,7 +81,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
   // Persist history
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_HISTORY, JSON.stringify(messages));
+      localStorage.setItem(historyKey, JSON.stringify(messages));
     } catch {}
   }, [messages]);
 
@@ -188,7 +189,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
 
   function resetChat() {
     try {
-      localStorage.removeItem(STORAGE_HISTORY);
+      localStorage.removeItem(historyKey);
     } catch {}
 
     const oldSid = sid;
@@ -235,6 +236,40 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     formData.append("text", text);
     formData.append("page", "chat");
     if (hasImage) formData.append("image", imageFile);
+
+    try {
+  const raw = localStorage.getItem("skinai_upload_form");
+  if (raw) {
+    const uploadForm = JSON.parse(raw);
+
+    if (uploadForm.name) formData.append("name", uploadForm.name);
+    if (uploadForm.age) formData.append("age", String(uploadForm.age));
+    if (uploadForm.sex) formData.append("sex", uploadForm.sex);
+    if (uploadForm.skinType) formData.append("skinType", uploadForm.skinType);
+    if (uploadForm.location) formData.append("location", uploadForm.location);
+    if (uploadForm.duration) formData.append("duration_days", String(uploadForm.duration));
+    if (uploadForm.primarySymptoms?.length) {
+      formData.append("primarySymptoms", uploadForm.primarySymptoms.join(", "));
+    }
+    if (uploadForm.medicalBackground) {
+      formData.append("medicalBackground", uploadForm.medicalBackground);
+    }
+    if (uploadForm.familyHistory) {
+      formData.append("familyHistory", uploadForm.familyHistory);
+    }
+    if (uploadForm.sunExposure) {
+      formData.append("sunExposure", uploadForm.sunExposure);
+    }
+    if (uploadForm.spfUse) {
+      formData.append("spfUse", uploadForm.spfUse);
+    }
+    if (uploadForm.currentMedications) {
+      formData.append("currentMedications", uploadForm.currentMedications);
+    }
+  }
+} catch (err) {
+  console.warn("Could not attach upload form data to chat:", err);
+}
 
     // Exponential backoff retry for rate-limit errors
     const maxRetries = 3;
