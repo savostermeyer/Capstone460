@@ -14,6 +14,9 @@ print("[load] chat.py from:", __file__)
 print("[dotenv] file:", find_dotenv(usecwd=True))
 print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
 
+# disease facts lookup
+from expertSystem.disease_facts import get_facts_for
+
 import google.generativeai as genai
 
 
@@ -347,6 +350,17 @@ FUNCTIONS = [{
         },
         "required": ["body_site", "patient_age"]  # NOTE: we do NOT require diameter here anymore; ask it if missing
     }
+},
+{
+    "name": "get_disease_facts",
+    "description": "Retrieve reference facts about a skin condition supported by the system.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "disease": {"type": "string", "description": "Internal code or common name (e.g. melanoma, bcc, akiec)"}
+        },
+        "required": ["disease"]
+    }
 }]
 
 
@@ -379,7 +393,8 @@ SYSTEM_INSTRUCTION = (
 
   "TOOL USE:\n"
   "• When you have body_site + age + change status + at least some ABCDE/symptoms, call expert_derm_consult. "
-  "Otherwise ask the single most important MISSING question.\n\n"
+  "Otherwise ask the single most important MISSING question.\n"
+  "• If the user asks for information about a particular disease or shows a prediction, you may call the get_disease_facts tool and quote the returned facts.\n\n"
 
   "STYLE:\n"
   "• Be concise and natural; avoid repetition. Use brief bullets for findings/next steps.\n"
@@ -641,50 +656,74 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
 
     for part in parts:
         fc = getattr(part, "function_call", None)
-        if fc and getattr(fc, "name", None) == "expert_derm_consult":
-            raw_args = getattr(fc, "args", None) or getattr(fc, "arguments", None)
-            args = _coerce_call_args(raw_args)
+        if fc:
+            name = getattr(fc, "name", None)
+            if name == "expert_derm_consult":
+                raw_args = getattr(fc, "args", None) or getattr(fc, "arguments", None)
+                args = _coerce_call_args(raw_args)
 
-            # IMPORTANT: enforce remembered truth (prevents repeats)
-            # Also fill common fields from slots if model omitted them.
-            args.update({k: v for k, v in state.slots.items() if v is not None})
+                # IMPORTANT: enforce remembered truth (prevents repeats)
+                # Also fill common fields from slots if model omitted them.
+                args.update({k: v for k, v in state.slots.items() if v is not None})
 
-            # If age/body_site were stored in slots, ensure the tool sees them
-            if "patient_age" not in args and state.slots.get("patient_age") is not None:
-                args["patient_age"] = state.slots["patient_age"]
-            if "body_site" not in args and state.slots.get("body_site"):
-                args["body_site"] = state.slots["body_site"]
+                # If age/body_site were stored in slots, ensure the tool sees them
+                if "patient_age" not in args and state.slots.get("patient_age") is not None:
+                    args["patient_age"] = state.slots["patient_age"]
+                if "body_site" not in args and state.slots.get("body_site"):
+                    args["body_site"] = state.slots["body_site"]
 
-            tool_payload = _run_rules(args)
+                tool_payload = _run_rules(args)
 
-            # If the tool asks the next question, set pending_slot based on it
-            nxt = (tool_payload.get("next_questions") or [])
-            if nxt:
-                q = nxt[0].lower()
-                if "bled" in q:
-                    state.pending_slot = "bleeding"
-                elif "crust" in q or "scab" in q:
-                    state.pending_slot = "crusting"
-                elif "itch" in q:
-                    state.pending_slot = "itching"
-                elif "pain" in q:
-                    state.pending_slot = "pain"
-                elif "how many colors" in q:
-                    state.pending_slot = "number_of_colors"
-                elif "how wide" in q or "diameter" in q:
-                    state.pending_slot = "diameter_mm"
+                # If the tool asks the next question, set pending_slot based on it
+                nxt = (tool_payload.get("next_questions") or [])
+                if nxt:
+                    q = nxt[0].lower()
+                    if "bled" in q:
+                        state.pending_slot = "bleeding"
+                    elif "crust" in q or "scab" in q:
+                        state.pending_slot = "crusting"
+                    elif "itch" in q:
+                        state.pending_slot = "itching"
+                    elif "pain" in q:
+                        state.pending_slot = "pain"
+                    elif "how many colors" in q:
+                        state.pending_slot = "number_of_colors"
+                    elif "how wide" in q or "diameter" in q:
+                        state.pending_slot = "diameter_mm"
 
-            call_id = getattr(fc, "id", None)
-            try:
-                followup = _retry_api_call(
-                    chat.submit_tool_outputs,
-                    tool_outputs=[{"call_id": call_id, "output": json.dumps(tool_payload)}],
-                )
-                reply_text = _resp_text(followup)
-            except Exception as e:
-                print(f"[step] submit_tool_outputs failed (after retries): {str(e)[:200]}")
-                reply_text = _format_tool_reply(tool_payload)
-            break
+                call_id = getattr(fc, "id", None)
+                try:
+                    followup = _retry_api_call(
+                        chat.submit_tool_outputs,
+                        tool_outputs=[{"call_id": call_id, "output": json.dumps(tool_payload)}],
+                    )
+                    reply_text = _resp_text(followup)
+                except Exception as e:
+                    print(f"[step] submit_tool_outputs failed (after retries): {str(e)[:200]}")
+                    reply_text = _format_tool_reply(tool_payload)
+                break
+            elif name == "get_disease_facts":
+                raw_args = getattr(fc, "args", None) or getattr(fc, "arguments", None)
+                args = _coerce_call_args(raw_args)
+                disease = args.get("disease", "") or ""
+                facts = get_facts_for(disease)
+                tool_payload = {"disease": disease, "facts": facts}
+                call_id = getattr(fc, "id", None)
+                try:
+                    followup = _retry_api_call(
+                        chat.submit_tool_outputs,
+                        tool_outputs=[{"call_id": call_id, "output": json.dumps(tool_payload)}],
+                    )
+                    reply_text = _resp_text(followup)
+                except Exception as e:
+                    print(f"[step] submit_tool_outputs failed for disease_facts: {str(e)[:200]}")
+                    # fallback: return a simple summary string
+                    if facts:
+                        lines = [f"{k}: {v}" for k, v in facts.items()]
+                        reply_text = "\n".join(lines)
+                    else:
+                        reply_text = "No facts found for that disease."
+                break
 
     # 3) fallback if no tool used
     if not reply_text:
