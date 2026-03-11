@@ -195,7 +195,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
       }).catch((e) => console.warn("Could not reset backend session:", e));
     }
 
-    setMessages(...DEFAULT_MESSAGES);
+    setMessages([...DEFAULT_MESSAGES]);
     setInput("");
     setImageFile(null);
     if(fileInputRef.current) fileInputRef.current.value = "";
