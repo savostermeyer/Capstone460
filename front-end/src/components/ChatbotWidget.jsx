@@ -3,8 +3,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const STORAGE_HISTORY_PREFIX = "skinai_chat_history_";
 const STORAGE_OPEN = "skinai_chat_open";
 const STORAGE_SID = "skinai_sid";
+
+//Default message 
+const DEFAULT_MESSAGES = [
+  {
+    type: "bot",
+    text: "Hello! I'm Skinderella. You can upload images on the upload page or tell me your symptoms, and I'll guide your analysis.",
+  },
+];
+
 console.log("🔥 ChatbotWidget loaded from:", import.meta.url);
-const historyKey = `${STORAGE_HISTORY_PREFIX}${sid}`;
+
+
 
 function newSid() {
   return "sid_" + Math.random().toString(36).substring(2);
@@ -28,10 +38,15 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     }
   }, []);
 
+  const historyKey = `${STORAGE_HISTORY_PREFIX}${sid}`;
+  
+
+  
   // Backend API base URL from environment, fallback to localhost:3720
   const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
   const [backendUrl, setBackendUrl] = useState(`${API_BASE}/chat?sid=${sid}`);
 
+  
   // Open state (persisted)
   const [open, setOpen] = useState(() => {
     try {
@@ -42,28 +57,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
   });
 
   // History (persisted)
-  const [messages, setMessages] = useState(() => {
-    try {
-      const raw = localStorage.getItem(historyKey);
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (parsed.length === 0) {
-        return [
-          {
-            type: "bot",
-            text: "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
-          },
-        ];
-      }
-      return parsed;
-    } catch {
-      return [
-        {
-          type: "bot",
-          text: "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
-        },
-      ];
-    }
-  });
+  const [messages, setMessages] = useState(() => [...DEFAULT_MESSAGES]);
 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -78,12 +72,6 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     } catch {}
   }, [open]);
 
-  // Persist history
-  useEffect(() => {
-    try {
-      localStorage.setItem(historyKey, JSON.stringify(messages));
-    } catch {}
-  }, [messages]);
 
   // Auto-scroll
   useEffect(() => {
@@ -207,10 +195,10 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
       }).catch((e) => console.warn("Could not reset backend session:", e));
     }
 
-    setMessages([
-      { type: "bot", text: "🔄 Chat reset. You can start a new conversation." },
-    ]);
+    setMessages(...DEFAULT_MESSAGES);
     setInput("");
+    setImageFile(null);
+    if(fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function sendMessage() {

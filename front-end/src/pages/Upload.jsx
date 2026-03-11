@@ -117,8 +117,9 @@ export default function Upload() {
   } catch {}
 }, [form]); 
 
+  
   const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
-
+  const sid = useMemo(() => getCurrentSid(), []);
   
   // Persistent session id (shared with chatbot widget)
 function getCurrentSid() {

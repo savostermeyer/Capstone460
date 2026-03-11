@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from keras_predictor import KerasResNetPredictor
 from dotenv import load_dotenv
-
+from expertSystem.disease_prediction import build_expert_fusion_output
 # --- Static path to .env in project root ---
 # Resolves from: expertSystem/app.py -> back-end/src/ -> back-end/ -> Capstone/
 APP_DIR = Path(__file__).resolve().parent
