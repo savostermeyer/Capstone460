@@ -50,6 +50,27 @@ const DISEASE_DESCRIPTIONS = {
   vasc: "Benign blood-vessel lesion; may appear red, purple, or blue.",
 };
 
+const FITZPATRICK_SCALE = {
+  I: "Very Fair (Type I)",
+  II: "Fair (Type II)",
+  III: "Medium (Type III)",
+  IV: "Olive (Type IV)",
+  V: "Dark Brown (Type V)",
+  VI: "Very Dark (Type VI)",
+  1: "Very Fair (Type I)",
+  2: "Fair (Type II)",
+  3: "Medium (Type III)",
+  4: "Olive (Type IV)",
+  5: "Dark Brown (Type V)",
+  6: "Very Dark (Type VI)",
+};
+
+function normalizeSkinType(skinType) {
+  if (!skinType) return "Unknown";
+  const normalized = String(skinType).trim();
+  return FITZPATRICK_SCALE[normalized] || normalized;
+}
+
 function normalizeLabel(label) {
   if (!label) return "Unknown";
   const raw = String(label).trim();
@@ -230,7 +251,7 @@ export default function Reports() {
       if (report.input?.user_email) addBlock(`Email: ${report.input.user_email}`);
       if (report.input?.age) addBlock(`Age: ${report.input.age}`);
       if (report.input?.sex) addBlock(`Sex: ${report.input.sex}`);
-      if (report.input?.skinType) addBlock(`Skin Type: ${report.input.skinType}`);
+      if (report.input?.skinType) addBlock(`Skin Type: ${normalizeSkinType(report.input.skinType)}`);
       if (report.input?.location) addBlock(`Location: ${report.input.location}`);
       if (report.input?.duration_days) addBlock(`Duration: ${report.input.duration_days} days`);
       if (report.input?.primarySymptoms) addBlock(`Symptoms: ${report.input.primarySymptoms}`);
@@ -242,16 +263,50 @@ export default function Reports() {
       addBlock(`Risk Level: ${riskScore}`);
       addBlock(`Suggested Next Step: ${nextStepForRisk(riskScore)}`);
 
-      const topPreds = getTopPredictions(report).slice(0, 3);
-      if (topPreds.length) {
+      // Handle multiple analysis results
+      if (report.allAnalysis && report.allAnalysis.length > 0) {
         y += 8;
-        addBlock("Top 3 Predictions:", 12, 8);
-        topPreds.forEach((p) => {
-          const label = normalizeLabel(p.label);
-          const desc = predictionDescription(p.label);
-          addBlock(`${label} — ${fmtPct(p.confidence)}`);
-          addBlock(`- ${desc}`, 10, 4);
+        addBlock("Analysis Results by Image:", 12, 8);
+        report.allAnalysis.forEach((analysis, idx) => {
+          y += 6;
+          addBlock(`Image ${idx + 1}:`, 11, 6);
+          const imgRisk = analysis.risk_score || "N/A";
+          addBlock(`  Risk Level: ${imgRisk}`, 10, 5);
+          addBlock(`  Next Step: ${nextStepForRisk(imgRisk)}`, 10, 5);
+
+          const topPreds = (analysis.top_predictions || [])
+            .map((p) => ({
+              label: p.label || p.name || "Unknown",
+              confidence: p.confidence ?? p.prob ?? p.score ?? 0,
+            }))
+            .slice(0, 3);
+
+          if (topPreds.length) {
+            addBlock(`  Top 3 Predictions:`, 10, 5);
+            topPreds.forEach((p) => {
+              const label = normalizeLabel(p.label);
+              const desc = predictionDescription(p.label);
+              addBlock(
+                `    • ${label} — ${fmtPct(p.confidence)}`,
+                9,
+                4
+              );
+              addBlock(`      ${desc}`, 9, 3);
+            });
+          }
         });
+      } else {
+        const topPreds = getTopPredictions(report).slice(0, 3);
+        if (topPreds.length) {
+          y += 8;
+          addBlock("Top 3 Predictions:", 12, 8);
+          topPreds.forEach((p) => {
+            const label = normalizeLabel(p.label);
+            const desc = predictionDescription(p.label);
+            addBlock(`${label} — ${fmtPct(p.confidence)}`);
+            addBlock(`- ${desc}`, 10, 4);
+          });
+        }
       }
 
       const images = report.images || report.input?.images || [];
@@ -435,12 +490,12 @@ export default function Reports() {
                       )}
                       {r.input.skinType && (
                         <div>
-                          <strong>Skin Type:</strong> {r.input.skinType}
+                          <strong>Skin Type:</strong> {normalizeSkinType(r.input.skinType)}
                         </div>
                       )}
                       {r.input.fitzpatrick && !r.input.skinType && (
                         <div>
-                          <strong>Skin Type:</strong> {r.input.fitzpatrick}
+                          <strong>Skin Type:</strong> {normalizeSkinType(r.input.fitzpatrick)}
                         </div>
                       )}
                       {r.input.location && (
@@ -561,44 +616,172 @@ export default function Reports() {
                 {/* ANALYSIS RESULTS */}
 
                 <div style={{ marginTop: 10 }}>
-                  <strong>Primary Result</strong>
-                  <div style={{ marginTop: 6 }}>
-                    <span className="pill">
-                      {r.analysis?.risk_score || r.primary_result || "N/A"}
-                    </span>
-                  </div>
+                  {/* Check if we have multi-image analysis */}
+                  {r.allAnalysis && r.allAnalysis.length > 0 ? (
+                    <div>
+                      <h3 style={{ marginBottom: 16 }}>Analysis Results</h3>
+                      {r.allAnalysis.map((analysis, idx) => {
+                        const topPreds = (analysis.top_predictions || [])
+                          .map((p) => ({
+                            label: p.label || p.name || "Unknown",
+                            confidence: p.confidence ?? p.prob ?? p.score ?? 0,
+                          }))
+                          .slice(0, 3);
 
-                  <div style={{ marginTop: 22 }}>
-                    <strong style={{ color: "#4a9ff5" }}>Top 3 predictions</strong>
-                    <div className="report-predictions">
-                      {getTopPredictions(r)
-                        .slice(0, 3)
-                        .map((p, i) => (
-                          <div key={i} className="report-prediction">
-                            <div>
-                              <strong>{normalizeLabel(p.label)}</strong>
-                              <span className="report-prediction-score">
-                                {fmtPct(p.confidence ?? 0)}
-                              </span>
+                        const riskScore = analysis.risk_score || "N/A";
+
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              marginBottom: 20,
+                              paddingBottom: 20,
+                              borderBottom:
+                                idx < r.allAnalysis.length - 1
+                                  ? "1px solid var(--border)"
+                                  : "none",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 12,
+                                marginBottom: 12,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: 50,
+                                  height: 50,
+                                  borderRadius: "var(--radius)",
+                                  overflow: "hidden",
+                                  backgroundColor: "var(--bg-alt)",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {(r.images || r.input?.images || [])[idx] && (() => {
+                                  const img = (r.images || r.input?.images || [])[idx];
+                                  const src = img.dataUrl || img.url || img.src || img;
+                                  const name = img.name || `Image ${idx + 1}`;
+                                  return (
+                                    <img
+                                      src={src}
+                                      alt={name}
+                                      style={{
+                                        width: "100%",
+                                        height: "100%",
+                                        objectFit: "cover",
+                                      }}
+                                    />
+                                  );
+                                })()}
+                              </div>
+                              <div>
+                                <p
+                                  style={{
+                                    fontSize: "0.9rem",
+                                    fontWeight: 600,
+                                    margin: 0,
+                                  }}
+                                >
+                                  Image {idx + 1}:
+                                  {(r.images || r.input?.images || [])[idx]?.name
+                                    ? ` ${(r.images || r.input?.images || [])[idx].name}`
+                                    : ""}
+                                </p>
+                                <p
+                                  style={{
+                                    fontSize: "0.85rem",
+                                    color: "var(--muted)",
+                                    margin: "4px 0 0 0",
+                                  }}
+                                >
+                                  Risk: {riskScore}
+                                </p>
+                              </div>
                             </div>
-                            <div className="muted report-prediction-desc">
-                              {predictionDescription(p.label)}
+
+                            <div style={{ marginTop: 10 }}>
+                              <strong style={{ color: "#4a9ff5" }}>
+                                Top 3 predictions
+                              </strong>
+                              <div className="report-predictions">
+                                {topPreds.map((p, i) => (
+                                  <div key={i} className="report-prediction">
+                                    <div>
+                                      <strong>{normalizeLabel(p.label)}</strong>
+                                      <span className="report-prediction-score">
+                                        {fmtPct(p.confidence ?? 0)}
+                                      </span>
+                                    </div>
+                                    <div className="muted report-prediction-desc">
+                                      {predictionDescription(p.label)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="report-next-step">
+                              <strong style={{ color: "#4a9ff5" }}>
+                                Suggested medical next step
+                              </strong>
+                              <p className="muted" style={{ marginTop: 6 }}>
+                                {nextStepForRisk(riskScore)}
+                              </p>
                             </div>
                           </div>
-                        ))}
+                        );
+                      })}
                     </div>
-                  </div>
+                  ) : (
+                    // Fallback for reports without allAnalysis
+                    <>
+                      <strong>Primary Result</strong>
+                      <div style={{ marginTop: 6 }}>
+                        <span className="pill">
+                          {r.analysis?.risk_score || r.primary_result || "N/A"}
+                        </span>
+                      </div>
 
-                  <div className="report-next-step">
-                    <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
-                    <p className="muted" style={{ marginTop: 6 }}>
-                      {nextStepForRisk(r.analysis?.risk_score || r.primary_result)}
-                    </p>
-                  </div>
+                      <div style={{ marginTop: 22 }}>
+                        <strong style={{ color: "#4a9ff5" }}>Top 3 predictions</strong>
+                        <div className="report-predictions">
+                          {getTopPredictions(r)
+                            .slice(0, 3)
+                            .map((p, i) => (
+                              <div key={i} className="report-prediction">
+                                <div>
+                                  <strong>{normalizeLabel(p.label)}</strong>
+                                  <span className="report-prediction-score">
+                                    {fmtPct(p.confidence ?? 0)}
+                                  </span>
+                                </div>
+                                <div className="muted report-prediction-desc">
+                                  {predictionDescription(p.label)}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
 
-                  <p className="muted" style={{ marginTop: 8 }}>
-                    {r.notes}
-                  </p>
+                      <div className="report-next-step">
+                        <strong style={{ color: "#4a9ff5" }}>
+                          Suggested medical next step
+                        </strong>
+                        <p className="muted" style={{ marginTop: 6 }}>
+                          {nextStepForRisk(
+                            r.analysis?.risk_score || r.primary_result
+                          )}
+                        </p>
+                      </div>
+
+                      <p className="muted" style={{ marginTop: 8 }}>
+                        {r.notes}
+                      </p>
+                    </>
+                  )}
                 </div>
 
                 <div

@@ -202,14 +202,18 @@ export default function Upload() {
       return;
     }
 
-    if (picked.length > 20) {
-      setFormMsg("Maximum 20 images allowed. Please select fewer images.");
-      return;
-    }
-
-    setFormMsg("");
-    setResult(null);
-    setFiles(picked);
+    setFiles((prev) => {
+      const combined = [...prev, ...picked];
+      
+      if (combined.length > 20) {
+        setFormMsg(`Maximum 20 images allowed (${prev.length} already selected, ${picked.length} new).`);
+        return prev;
+      }
+      
+      setFormMsg("");
+      setResult(null);
+      return combined;
+    });
   }
 
   function onDrop(e) {
@@ -432,8 +436,28 @@ export default function Upload() {
       }
 
       // Normalize new pipeline response into the shape the UI expects
-      // new response shape: { top_predictions, risk_score, explanation_summary }
+      // n response shape: { top_predictions, risk_score, explanation_summary }
       const normalized = {};
+      
+      // Store ALL results, not just the first
+      normalized.all_results = results.map((result, idx) => ({
+        imageIndex: idx,
+        primary_result: result.risk_score ?? null,
+        key_indicators: {
+          high_risk_flag: (result.risk_score || "").toLowerCase() === "high_risk",
+          moderate_risk_flag: (result.risk_score || "").toLowerCase() === "moderate_risk",
+          low_risk_flag: (result.risk_score || "").toLowerCase() === "low_risk",
+          needs_clinician_review: (result.risk_score || "").toLowerCase() === "high_risk",
+        },
+        model_topk: (result.top_predictions || []).map((p) => ({
+          label: p.label,
+          prob: p.confidence ?? p.prob ?? 0,
+        })),
+        facts: result.explanation_summary?.facts || result.explanation_summary || {},
+        trace: result.explanation_summary?.trace || [],
+      }));
+      
+      // Keep backward compatibility with "primary" for first image
       normalized.primary_result = first.risk_score ?? null;
 
       // derive key indicators from risk_score
@@ -543,6 +567,7 @@ export default function Upload() {
           meta,
           user_email: userEmail,
           analysis: first,
+          allAnalysis: results,
           images,
           input: {
             user_email: userEmail,
@@ -992,49 +1017,64 @@ export default function Upload() {
 
             <p className="muted" style={{ marginBottom: 16 }}>{result?.meta || ""}</p>
 
-            {result?.raw && (
-              <>
-                <div style={{ marginTop: 10 }}>
-                  <strong>Primary Result</strong>
-                  <div style={{ marginTop: 6 }}>
-                    <span className="pill">
-                      {result.raw.primary_result ?? "N/A"}
-                    </span>
-                  </div>
-                </div>
+            {result?.raw && result?.raw?.all_results && (
+              <div>
+                {result.raw.all_results.map((imgResult, idx) => (
+                  <div key={idx} style={{ marginBottom: 28, paddingBottom: 20, borderBottom: idx < result.raw.all_results.length - 1 ? "1px solid var(--border)" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                      <div style={{ width: 60, height: 60, borderRadius: "var(--radius)", overflow: "hidden", backgroundColor: "var(--bg-alt)", flexShrink: 0 }}>
+                        {previews[idx] && (
+                          <img
+                            src={previews[idx].url}
+                            alt={`Image ${idx + 1}`}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        )}
+                      </div>
+                      <div>
+                        <p style={{ fontSize: "0.9rem", fontWeight: 600, margin: 0 }}>
+                          Image {idx + 1}: {previews[idx]?.name || "Unknown"}
+                        </p>
+                        <p style={{ fontSize: "0.85rem", color: "var(--muted)", margin: "4px 0 0 0" }}>
+                          {imgResult.primary_result ?? "N/A"}
+                        </p>
+                      </div>
+                    </div>
 
-                <div style={{ marginTop: 22 }}>
-                  <strong style={{ color: "#4a9ff5" }}>Top 3 predictions</strong>
-                  <div className="report-predictions">
-                    {(result.raw_full?.top_predictions || result.raw?.model_topk || [])
-                      .slice(0, 3)
-                      .map((p, i) => {
-                        const label = p.label || p.name || "Unknown";
-                        const confidence = p.confidence ?? p.prob ?? 0;
-                        return (
-                          <div key={i} className="report-prediction">
-                            <div>
-                              <strong>{normalizeLabel(label)}</strong>
-                              <span className="report-prediction-score">
-                                {fmtPct(confidence)}
-                              </span>
-                            </div>
-                            <div className="muted report-prediction-desc">
-                              {predictionDescription(label)}
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
+                    <div style={{ marginTop: 10 }}>
+                      <strong style={{ color: "#4a9ff5" }}>Top 3 predictions</strong>
+                      <div className="report-predictions">
+                        {(imgResult.model_topk || [])
+                          .slice(0, 3)
+                          .map((p, i) => {
+                            const label = p.label || p.name || "Unknown";
+                            const confidence = p.prob ?? 0;
+                            return (
+                              <div key={i} className="report-prediction">
+                                <div>
+                                  <strong>{normalizeLabel(label)}</strong>
+                                  <span className="report-prediction-score">
+                                    {fmtPct(confidence)}
+                                  </span>
+                                </div>
+                                <div className="muted report-prediction-desc">
+                                  {predictionDescription(label)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
 
-                <div className="report-next-step">
-                  <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
-                  <p className="muted" style={{ marginTop: 6 }}>
-                    {nextStepForRisk(result.raw.primary_result)}
-                  </p>
-                </div>
-              </>
+                    <div className="report-next-step">
+                      <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
+                      <p className="muted" style={{ marginTop: 6 }}>
+                        {nextStepForRisk(imgResult.primary_result)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
           {/* AI explanation moved into chatbot window; assistant message is dispatched to widget */}
