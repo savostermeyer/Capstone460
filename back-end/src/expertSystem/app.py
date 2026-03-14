@@ -95,6 +95,7 @@ CORS(app)
 # --- MongoDB client for reports storage (optional) ---
 mongo_client = None
 reports_coll = None
+health_info_coll = None
 MONGO_URI = os.getenv("MONGODB_URI") or os.getenv("MONGO_URI")
 if MONGO_URI:
     try:
@@ -104,7 +105,11 @@ if MONGO_URI:
         reports_coll = mongo_client.get_database("skin-images").get_collection(
             "reports"
         )
+        health_info_coll = mongo_client.get_database("patientInfo").get_collection(
+            "healthInfo"
+        )
         print("[mongo] reports collection ready")
+        print("[mongo] healthInfo collection ready")
     except Exception as e:
         print("[mongo] could not connect:", e)
 
@@ -333,6 +338,55 @@ def save_report():
         )
         res = reports_coll.insert_one(payload)
         return jsonify({"report_id": str(res.inserted_id)})
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify(error=str(e)), 500
+
+
+@app.post("/api/health-info")
+def save_health_info():
+    """Save intake health information to patientInfo.healthInfo."""
+    try:
+        payload = request.get_json(force=True)
+        if not payload:
+            return jsonify(error="JSON body required"), 400
+
+        if health_info_coll is None:
+            return jsonify(error="Health info storage not configured"), 503
+
+        patient_email = (
+            str(
+                payload.get("patientEmail")
+                or payload.get("patient_email")
+                or (payload.get("healthInfo", {}) or {}).get("patientEmail")
+                or (payload.get("healthInfo", {}) or {}).get("patient_email")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+        if not patient_email:
+            return jsonify(error="patientEmail is required"), 400
+
+        health_info = payload.get("healthInfo")
+        if not isinstance(health_info, dict):
+            return jsonify(error="healthInfo object is required"), 400
+
+        doc = {
+            "patientEmail": patient_email,
+            "healthInfo": health_info,
+            "analysisMeta": payload.get("analysisMeta")
+            if isinstance(payload.get("analysisMeta"), dict)
+            else {},
+            "source": payload.get("source") or "upload-page",
+            "createdAt": payload.get("createdAt")
+            or __import__("datetime").datetime.utcnow().isoformat(),
+        }
+
+        res = health_info_coll.insert_one(doc)
+        return jsonify({"healthInfoId": str(res.inserted_id)})
     except Exception as e:
         import traceback
 
