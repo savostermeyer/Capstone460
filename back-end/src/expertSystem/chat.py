@@ -4,7 +4,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from difflib import get_close_matches
+from difflib import get_close_matches, SequenceMatcher
 
 import os, json, time, re
 from collections.abc import Mapping
@@ -246,6 +246,45 @@ def _parse_yes_no(s: str) -> Optional[bool]:
         return True
     if fuzzy in no_words:
         return False
+    return None
+
+
+def _parse_asymmetry_answer(text: str) -> Optional[float]:
+    low = re.sub(r"[^a-z\s]", " ", str(text or "").lower())
+    low = re.sub(r"\s+", " ", low).strip()
+    if not low:
+        return None
+
+    # Common direct forms first.
+    if re.search(r"\bnot\s+(asymmetrical|asymmetric|asymmetry)\b", low):
+        return 0.0
+    if re.search(r"\bnot\s+(symmetrical|symmetric|symmetry)\b", low):
+        return 1.0
+
+    if re.search(r"\b(symmetrical|symmetric|even|same)\b", low):
+        return 0.0
+    if re.search(r"\b(asymmetrical|asymmetric|uneven|different)\b", low):
+        return 1.0
+
+    # Fuzzy typo support (e.g., "symtrcial", "aystrmetrical").
+    sym_words = ["symmetrical", "symmetric", "symmetry"]
+    asym_words = ["asymmetrical", "asymmetric", "asymmetry"]
+
+    probes = low.split() + [low]
+
+    def _best_similarity(cands: List[str]) -> float:
+        best = 0.0
+        for probe in probes:
+            for cand in cands:
+                best = max(best, SequenceMatcher(None, probe, cand).ratio())
+        return best
+
+    sym_score = _best_similarity(sym_words)
+    asym_score = _best_similarity(asym_words)
+
+    if max(sym_score, asym_score) >= 0.74:
+        return 1.0 if asym_score > sym_score else 0.0
+
     return None
 
 
@@ -705,6 +744,12 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
     if slot == "asymmetry":
         if _is_unsure(ut):
             state.slots["asymmetry"] = None
+            state.pending_slot = None
+            return True
+
+        asym = _parse_asymmetry_answer(ut)
+        if asym is not None:
+            state.slots["asymmetry"] = asym
             state.pending_slot = None
             return True
 
