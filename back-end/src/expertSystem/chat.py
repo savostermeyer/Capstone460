@@ -226,11 +226,41 @@ def _extract_classifier_probs(metadata: Dict[str, Any]) -> Dict[str, float]:
 
 
 def _parse_yes_no(s: str) -> Optional[bool]:
-    t = (s or "").strip().lower()
-    if t in {"yes", "y"}:
+    t = re.sub(r"[^a-z\s]", " ", (s or "").strip().lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    if t in {"yes", "y", "yeah", "yep", "true", "affirmative", "sure", "ok", "okay"}:
         return True
-    if t in {"no", "n"}:
+    if t in {"no", "n", "nope", "nah", "false", "negative"}:
         return False
+    return None
+
+
+def _parse_number_word_0_10(text: str) -> Optional[float]:
+    low = (text or "").strip().lower().replace("-", " ")
+    low = re.sub(r"[^a-z\s]", " ", low)
+    low = re.sub(r"\s+", " ", low).strip()
+
+    word_to_num = {
+        "zero": 0,
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+    }
+
+    if low in word_to_num:
+        return float(word_to_num[low])
+
+    for w, n in word_to_num.items():
+        if re.search(rf"\b{re.escape(w)}\b", low):
+            return float(n)
+
     return None
 
 
@@ -252,6 +282,20 @@ def _parse_symptom_scale(s: str) -> Optional[float]:
             return max(0.0, min(10.0, n))
         except Exception:
             pass
+
+    # number embedded in free text, e.g. "it's around 5"
+    m_any = re.search(r"\b(\d+(?:\.\d+)?)\b", t)
+    if m_any:
+        try:
+            n = float(m_any.group(1))
+            return max(0.0, min(10.0, n))
+        except Exception:
+            pass
+
+    # word-number support, e.g. "five"
+    n_word = _parse_number_word_0_10(t)
+    if n_word is not None:
+        return n_word
 
     if t == "none":
         return 0.0
@@ -396,6 +440,8 @@ def _normalize_choice(text: str, choices: List[str]) -> Optional[str]:
 
     for canonical, vals in aliases.items():
         if low in vals and canonical in choices:
+            return canonical
+        if canonical in choices and any(re.search(rf"\b{re.escape(v)}\b", low) for v in vals):
             return canonical
 
     return low if low in choices else None
@@ -561,17 +607,33 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
             state.pending_slot = None
             return True
 
-        word_to_num = {"one": 1, "two": 2, "three": 3}
+        word_to_num = {
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+        }
 
         n = None
         if low in word_to_num:
             n = word_to_num[low]
-        elif low in {"three+", "3+"}:
+        elif low in {"three+", "3+", "three or more", "3 or more", "more than three"}:
             n = 3
         else:
-            m = re.match(r"^\d+$", low)
+            m = re.search(r"\b\d+\b", low)
             if m:
-                n = int(low)
+                n = int(m.group(0))
+            else:
+                for w, v in word_to_num.items():
+                    if re.search(rf"\b{re.escape(w)}\b", low):
+                        n = v
+                        break
 
         if n is not None and n >= 1:
             state.slots["number_of_colors"] = float(n)
