@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from keras_predictor import KerasResNetPredictor
 from dotenv import load_dotenv
-
+from expertSystem.disease_prediction import build_expert_fusion_output
 # --- Static path to .env in project root ---
 # Resolves from: expertSystem/app.py -> back-end/src/ -> back-end/ -> Capstone/
 APP_DIR = Path(__file__).resolve().parent
@@ -186,9 +186,7 @@ def _analysis_to_chat_message(pipeline_result: dict) -> str:
     return (
         f"{disclaimer}\n\n"
         f"Preliminary result: {primary}\n"
-        f"Top predictions: {preds}\n\n"
-        "To improve accuracy, I have one quick question:\n"
-        "Where on the body is this located? (e.g., left forearm)"
+        f"Top predictions: {preds}"
     )
 
 @app.post("/analyze_skin")
@@ -251,6 +249,32 @@ def analyze_skin():
         st = _SESS.get(sid) or ConvState()
 
         chat_message = _analysis_to_chat_message(pipeline_result)
+
+        # Seed canonical classifier probabilities into session state so later /chat turns
+        # can keep image-informed predictions even if model_topk is not resent.
+        topk_seed = (pipeline_result.get("ml", {}) or {}).get("topK", []) or []
+        clf_seed = {}
+        for p in topk_seed:
+            if not isinstance(p, dict):
+                continue
+            key = str(p.get("label") or "").strip().lower()
+            if not key:
+                continue
+            try:
+                clf_seed[key] = float(p.get("prob", p.get("confidence", 0.0)) or 0.0)
+            except Exception:
+                continue
+        if clf_seed:
+            st.slots["classifier_probs"] = clf_seed
+
+        # Seed intake fields when available for better continuity across chat turns.
+        if upload_fields.get("location"):
+            st.slots["body_site"] = upload_fields.get("location")
+        if upload_fields.get("age") not in (None, ""):
+            try:
+                st.slots["patient_age"] = float(upload_fields.get("age"))
+            except Exception:
+                pass
 
         st.history.append({
             "role": "model",

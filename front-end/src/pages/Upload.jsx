@@ -110,21 +110,31 @@ export default function Upload() {
     currentMedications: "",
     consent: false,
   });
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
 
+  useEffect(() => {
+  try {
+    localStorage.setItem("skinai_upload_form", JSON.stringify(form));
+  } catch {}
+}, [form]); 
+
+  
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
+  const sid = useMemo(() => getCurrentSid(), []);
+  
   // Persistent session id (shared with chatbot widget)
-  const sid = useMemo(() => {
-    try {
-      let existing = localStorage.getItem("skinai_sid");
-      if (!existing) {
-        existing = "sid_" + Math.random().toString(36).substring(2);
-        localStorage.setItem("skinai_sid", existing);
-      }
-      return existing;
-    } catch {
-      return "sid_" + Math.random().toString(36).substring(2);
+function getCurrentSid() {
+  try {
+    let existing = localStorage.getItem("skinai_sid");
+    if (!existing) {
+      existing = "sid_" + Math.random().toString(36).substring(2);
+      localStorage.setItem("skinai_sid", existing);
     }
-  }, []);
+    return existing;
+  } catch {
+    return "sid_" + Math.random().toString(36).substring(2);
+  }
+}
+
   const [formMsg, setFormMsg] = useState("");
   const [result, setResult] = useState(null); // demo result object
   const [userEmail, setUserEmail] = useState(getLoggedInUser);
@@ -274,6 +284,7 @@ export default function Upload() {
   }
 
   async function handleSubmit(e) {
+    
     e.preventDefault();
 
     if (!userEmail) {

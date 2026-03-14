@@ -2,6 +2,7 @@ const express = require("express");
 const { MongoClient } = require("mongodb");
 const multer = require("multer");
 const path = require("path");
+const dns = require("dns");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const bcrypt = require("bcrypt");
 require("dotenv").config();
@@ -9,8 +10,24 @@ require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+if (process.env.NODE_DNS_SERVERS) {
+  const dnsServers = process.env.NODE_DNS_SERVERS.split(",")
+    .map((server) => server.trim())
+    .filter(Boolean);
+  if (dnsServers.length > 0) {
+    try {
+      dns.setServers(dnsServers);
+      console.log("Using custom DNS servers:", dnsServers.join(", "));
+    } catch (error) {
+      console.warn("Failed to set custom DNS servers:", error.message);
+    }
+  }
+}
+
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+// console.log("Loaded Gemini API key prefix:", (geminiApiKey || "").slice(0,8));
+const genAI = new GoogleGenerativeAI(geminiApiKey);
 const model = genAI.getGenerativeModel({
   model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
 });
@@ -40,10 +57,6 @@ async function connectDB() {
 // Get auth database helper
 function getAuthDB() {
   return client.db("auth");
-}
-
-function getPatientInfoDB() {
-  return client.db("patientInfo");
 }
 
 // Configure multer for file uploads
@@ -90,22 +103,13 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
       return res.status(400).json({ error: "No image file provided" });
     }
 
-    let patientInfo = req.body.patientInfo || {};
-    if (typeof patientInfo === "string") {
-      try {
-        patientInfo = JSON.parse(patientInfo);
-      } catch {
-        patientInfo = { raw: patientInfo };
-      }
-    }
-
     const imageDocument = {
       filename: req.file.originalname,
       contentType: req.file.mimetype,
       size: req.file.size,
       data: req.file.buffer,
       uploadDate: new Date(),
-      patientInfo,
+      patientInfo: req.body.patientInfo || {},
     };
 
     const result = await db.collection("images").insertOne(imageDocument);
@@ -117,86 +121,6 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
   } catch (error) {
     console.error("Upload error:", error);
     res.status(500).json({ error: "Failed to upload image" });
-  }
-});
-
-app.post("/api/health-info", async (req, res) => {
-  try {
-    const { patientEmail, healthInfo, source, analysisMeta } = req.body || {};
-    const normalizedEmail = String(patientEmail || "")
-      .trim()
-      .toLowerCase();
-
-    if (!normalizedEmail) {
-      return res.status(400).json({ error: "patientEmail is required" });
-    }
-
-    if (!healthInfo || typeof healthInfo !== "object") {
-      return res.status(400).json({ error: "healthInfo object is required" });
-    }
-
-    const authDB = getAuthDB();
-    const usersCollection = authDB.collection("users");
-    const patientUser = await usersCollection.findOne({
-      email: normalizedEmail,
-    });
-
-    const healthInfoCollection = getPatientInfoDB().collection("healthInfo");
-    const document = {
-      patientEmail: normalizedEmail,
-      patientUserId: patientUser?._id || null,
-      healthInfo,
-      analysisMeta:
-        analysisMeta && typeof analysisMeta === "object" ? analysisMeta : {},
-      source: source || "upload",
-      createdAt: new Date(),
-    };
-
-    const result = await healthInfoCollection.insertOne(document);
-
-    res.status(201).json({
-      message: "Health info saved successfully",
-      healthInfoId: result.insertedId,
-      patientEmail: normalizedEmail,
-    });
-  } catch (error) {
-    console.error("Save health info error:", error);
-    res.status(500).json({ error: "Failed to save health info" });
-  }
-});
-
-app.post("/api/reports/save", async (req, res) => {
-  try {
-    const payload = req.body || {};
-    const userEmail = String(
-      payload.user_email ||
-        payload.userEmail ||
-        payload?.input?.user_email ||
-        payload?.input?.userEmail ||
-        "",
-    )
-      .trim()
-      .toLowerCase();
-
-    if (!userEmail) {
-      return res.status(400).json({ error: "user_email is required" });
-    }
-
-    const reportDocument = {
-      ...payload,
-      user_email: userEmail,
-      input:
-        payload.input && typeof payload.input === "object"
-          ? { ...payload.input, user_email: userEmail }
-          : { user_email: userEmail },
-      createdAt: payload.createdAt || new Date().toISOString(),
-    };
-
-    const result = await db.collection("reports").insertOne(reportDocument);
-    return res.status(201).json({ report_id: result.insertedId });
-  } catch (error) {
-    console.error("Save report error:", error);
-    return res.status(500).json({ error: "Failed to save report" });
   }
 });
 
