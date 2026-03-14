@@ -15,6 +15,15 @@ function getLoggedInUser() {
   }
 }
 
+function getUserRole() {
+  try {
+    const raw = (localStorage.getItem("skinai_role") || "patient").trim().toLowerCase();
+    return raw || "patient";
+  } catch {
+    return "patient";
+  }
+}
+
 function fmtPct(x) {
   return (x * 100).toFixed(1) + "%";
 }
@@ -105,11 +114,47 @@ export default function Reports() {
   const navigate = useNavigate();
 
   const [userEmail, setUserEmail] = useState(getLoggedInUser);
+  const [userRole, setUserRole] = useState(getUserRole);
+  const isDoctor = userRole === "doctor";
 
   const [showLoginGate, setShowLoginGate] = useState(false);
+  const [reports, setReports] = useState([]);
+  const [selectedPatient, setSelectedPatient] = useState("all");
+  const [dateSort, setDateSort] = useState("newest");
+  const [detailsOpen, setDetailsOpen] = useState({});
+  const [editingNotes, setEditingNotes] = useState({});
+  const [noteDrafts, setNoteDrafts] = useState({});
+
+  // Derive sorted unique patient emails from all loaded reports (doctor only)
+  const uniquePatients = isDoctor
+    ? Array.from(
+        new Set(
+          reports.map((r) => r.user_email || r.input?.user_email || "").filter(Boolean),
+        ),
+      ).sort()
+    : [];
+
+  // Reports visible in the current view (filtered + sorted)
+  const visibleReports = (() => {
+    let filtered =
+      isDoctor && selectedPatient !== "all"
+        ? reports.filter(
+            (r) => (r.user_email || r.input?.user_email || "") === selectedPatient,
+          )
+        : [...reports];
+    filtered.sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateSort === "oldest" ? ta - tb : tb - ta;
+    });
+    return filtered;
+  })();
 
   useEffect(() => {
-    const syncUser = () => setUserEmail(getLoggedInUser());
+    const syncUser = () => {
+      setUserEmail(getLoggedInUser());
+      setUserRole(getUserRole());
+    };
 
     syncUser();
     window.addEventListener("storage", syncUser);
@@ -134,8 +179,7 @@ export default function Reports() {
     return () => clearTimeout(timerId);
   }, [userEmail]);
 
-  const storageKey = userEmail ? `skinai_reports_${userEmail}` : null;
-  const [reports, setReports] = useState([]);
+  const storageKey = !isDoctor && userEmail ? `skinai_reports_${userEmail}` : null;
 
   // load reports from backend if available, else fallback to localStorage
   useEffect(() => {
@@ -149,13 +193,21 @@ export default function Reports() {
 
       if (API_BASE) {
         try {
-          const res = await fetch(
-            `${API_BASE}/reports?user_email=${encodeURIComponent(userEmail)}`,
-          );
+          const route = isDoctor
+            ? `${API_BASE}/reports`
+            : `${API_BASE}/reports?user_email=${encodeURIComponent(userEmail)}`;
+          const res = await fetch(route);
           if (res.ok) {
             const js = await res.json();
-            if (Array.isArray(js) && js.length > 0) {
+            if (Array.isArray(js)) {
               setReports(js);
+              if (isDoctor) {
+                const initial = {};
+                js.forEach((report) => {
+                  initial[report.id] = false;
+                });
+                setDetailsOpen(initial);
+              }
               return;
             }
           }
@@ -164,23 +216,72 @@ export default function Reports() {
         }
       }
 
-      if (!storageKey) return;
-      const raw = localStorage.getItem(storageKey);
-      let data = raw ? JSON.parse(raw) : [];
+      let data = [];
+      if (isDoctor) {
+        const allKeys = Object.keys(localStorage).filter((key) =>
+          key.startsWith("skinai_reports_"),
+        );
+        data = allKeys.flatMap((key) => {
+          try {
+            const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        });
+      } else {
+        if (!storageKey) return;
+        const raw = localStorage.getItem(storageKey);
+        data = raw ? JSON.parse(raw) : [];
+      }
+
       // Ensure each report has an id for proper functionality
       data = data.map((r) => ({
         ...r,
         id: r.id || "report_" + (r.createdAt ? new Date(r.createdAt).getTime() : Date.now()) + "_" + Math.random().toString(36).substring(2, 9),
       }));
+
+      // For patients: merge in any doctor notes saved to the shared key
+      // (covers the same-browser demo case where backend is unavailable)
+      if (!isDoctor) {
+        try {
+          const sharedNotes = JSON.parse(localStorage.getItem("skinai_doctor_notes") || "{}");
+          if (Object.keys(sharedNotes).length > 0) {
+            data = data.map((r) => {
+              const entry = sharedNotes[r.id];
+              if (entry && entry.note !== undefined) {
+                return {
+                  ...r,
+                  doctor_note: entry.note,
+                  doctor_note_by: entry.by,
+                  doctor_note_updated_at: entry.at,
+                };
+              }
+              return r;
+            });
+          }
+        } catch (err) {
+          console.warn("Could not read shared doctor notes", err);
+        }
+      }
+
       setReports(data);
+      if (isDoctor) {
+        const initial = {};
+        data.forEach((report) => {
+          initial[report.id] = false;
+        });
+        setDetailsOpen(initial);
+      }
     }
 
     load();
-  }, [storageKey, userEmail]);
+  }, [isDoctor, storageKey, userEmail]);
 
 
   function signOut() {
     localStorage.removeItem("skinai_user");
+    localStorage.removeItem("skinai_role");
     navigate("/login", { replace: true });
   }
 
@@ -193,6 +294,103 @@ export default function Reports() {
     const next = reports.filter((r) => r.id !== id);
     setReports(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
+  }
+
+  function toggleDetails(reportId) {
+    setDetailsOpen((prev) => ({
+      ...prev,
+      [reportId]: !prev[reportId],
+    }));
+  }
+
+  function beginEditDoctorNote(report) {
+    setEditingNotes((prev) => ({ ...prev, [report.id]: true }));
+    setNoteDrafts((prev) => ({
+      ...prev,
+      [report.id]: prev[report.id] ?? report.doctor_note ?? "",
+    }));
+    // Scroll to the doctor note section after React has rendered it
+    setTimeout(() => {
+      const el = document.getElementById(`doctor-note-${report.id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        // briefly highlight the textarea so it's obvious
+        const ta = el.querySelector("textarea");
+        if (ta) ta.focus();
+      }
+    }, 60);
+  }
+
+  function cancelEditDoctorNote(reportId) {
+    setEditingNotes((prev) => ({ ...prev, [reportId]: false }));
+  }
+
+  async function saveDoctorNote(report) {
+    const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
+    const noteText = (noteDrafts[report.id] || "").trim();
+    const now = new Date().toISOString();
+
+    const nextReport = {
+      ...report,
+      doctor_note: noteText,
+      doctor_note_by: userEmail,
+      doctor_note_updated_at: now,
+    };
+
+    // 1. Try to persist to backend (MongoDB) — this is the cross-browser/device link
+    let persisted = false;
+    if (API_BASE && report.id) {
+      try {
+        const res = await fetch(`${API_BASE}/reports/note`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            report_id: report.id,
+            doctor_note: noteText,
+            doctor_email: userEmail,
+          }),
+        });
+        persisted = res.ok;
+      } catch (err) {
+        console.warn("Could not persist doctor note to backend", err);
+      }
+    }
+
+    // 2. Update shared localStorage notes map — works as fallback when doctor + patient
+    //    share the same browser (demo / local dev scenario)
+    try {
+      const sharedNotes = JSON.parse(localStorage.getItem("skinai_doctor_notes") || "{}");
+      sharedNotes[report.id] = {
+        note: noteText,
+        by: userEmail,
+        at: now,
+      };
+      localStorage.setItem("skinai_doctor_notes", JSON.stringify(sharedNotes));
+    } catch (err) {
+      console.warn("Could not write to shared notes key", err);
+    }
+
+    // 3. Also update the patient's own report key directly (same-browser fallback)
+    const patientEmail = report.user_email || report.input?.user_email;
+    if (patientEmail) {
+      const reportKey = `skinai_reports_${patientEmail}`;
+      try {
+        const existing = JSON.parse(localStorage.getItem(reportKey) || "[]");
+        if (Array.isArray(existing)) {
+          const updated = existing.map((item) => (item.id === report.id ? nextReport : item));
+          localStorage.setItem(reportKey, JSON.stringify(updated));
+        }
+      } catch (err) {
+        console.warn("Could not persist doctor note to patient local storage", err);
+      }
+    }
+
+    setReports((prev) => prev.map((r) => (r.id === report.id ? nextReport : r)));
+    setEditingNotes((prev) => ({ ...prev, [report.id]: false }));
+
+    if (!persisted) {
+      console.warn("Backend not available; note saved to localStorage only.");
+    }
   }
 
   async function downloadReport(report) {
@@ -241,6 +439,11 @@ export default function Reports() {
       y += 8;
       addBlock(`Risk Level: ${riskScore}`);
       addBlock(`Suggested Next Step: ${nextStepForRisk(riskScore)}`);
+      if (report.doctor_note) {
+        y += 8;
+        addBlock("Doctor Note:", 12, 8);
+        addBlock(report.doctor_note, 11, 6);
+      }
 
       const topPreds = getTopPredictions(report).slice(0, 3);
       if (topPreds.length) {
@@ -337,8 +540,91 @@ export default function Reports() {
         </div>
 
         <p className="muted" style={{ marginTop: 8 }}>
-          Your saved analysis results are shown below.
+          {isDoctor
+            ? "Doctor view: you can review all patient reports and add doctor notes."
+            : "Your saved analysis results are shown below."}
         </p>
+
+        {/* Doctor patient-filter dropdown */}
+        {isDoctor && reports.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              margin: "16px 0",
+              flexWrap: "wrap",
+            }}
+          >
+            <label
+              htmlFor="patient-select"
+              style={{ fontWeight: 600, whiteSpace: "nowrap" }}
+            >
+              Filter by patient:
+            </label>
+            <select
+              id="patient-select"
+              value={selectedPatient}
+              onChange={(e) => setSelectedPatient(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid var(--border, #444)",
+                background: "var(--card-bg, #1a1a1a)",
+                color: "inherit",
+                fontSize: "0.95rem",
+                minWidth: 240,
+                cursor: "pointer",
+              }}
+            >
+              <option value="all">All patients ({reports.length} report{reports.length !== 1 ? "s" : ""})</option>
+              {uniquePatients.map((email) => {
+                const count = reports.filter(
+                  (r) => (r.user_email || r.input?.user_email || "") === email,
+                ).length;
+                return (
+                  <option key={email} value={email}>
+                    {email} ({count} report{count !== 1 ? "s" : ""})
+                  </option>
+                );
+              })}
+            </select>
+            {selectedPatient !== "all" && (
+              <button
+                className="btn btn-cta"
+                style={{ padding: "8px 14px" }}
+                onClick={() => setSelectedPatient("all")}
+              >
+                Clear filter
+              </button>
+            )}
+
+            <label
+              htmlFor="date-sort"
+              style={{ fontWeight: 600, whiteSpace: "nowrap", marginLeft: 8 }}
+            >
+              Sort by date:
+            </label>
+            <select
+              id="date-sort"
+              value={dateSort}
+              onChange={(e) => setDateSort(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid var(--border, #444)",
+                background: "var(--card-bg, #1a1a1a)",
+                color: "inherit",
+                fontSize: "0.95rem",
+                minWidth: 200,
+                cursor: "pointer",
+              }}
+            >
+              <option value="newest">Latest uploaded first</option>
+              <option value="oldest">Earliest uploaded first</option>
+            </select>
+          </div>
+        )}
 
         {reports.length === 0 ? (
           <div className="card">
@@ -348,9 +634,13 @@ export default function Reports() {
               report.
             </p>
           </div>
+        ) : visibleReports.length === 0 ? (
+          <div className="card">
+            <p>No reports for <strong>{selectedPatient}</strong>.</p>
+          </div>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
-            {reports.map((r) => (
+            {visibleReports.map((r) => (
               <div key={r.id} className="card">
                 <div
                   style={{
@@ -367,9 +657,36 @@ export default function Reports() {
                     <div className="muted">
                       Created: {fmtDate(r.createdAt)}
                     </div>
+                    {isDoctor && (
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        Patient: {r.input?.user_email || r.user_email || "Unknown"}
+                      </div>
+                    )}
                   </div>
 
-                  <div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    {isDoctor && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-cta"
+                          title="View patient report details"
+                          onClick={() => toggleDetails(r.id)}
+                          style={{ minWidth: 40, padding: "10px 12px" }}
+                        >
+                          👁
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-cta"
+                          title="Add or edit doctor note"
+                          onClick={() => beginEditDoctorNote(r)}
+                          style={{ minWidth: 40, padding: "10px 12px" }}
+                        >
+                          ✎
+                        </button>
+                      </>
+                    )}
                     <Link className="btn btn-cta" to="/upload">
                       Analyze another
                     </Link>
@@ -397,7 +714,7 @@ export default function Reports() {
                 )}
 
                 {/* PATIENT INTAKE INFORMATION */}
-                {r.input && (
+                {r.input && (!isDoctor || detailsOpen[r.id]) && (
                   <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
                     <strong style={{ display: "block", marginBottom: 8 }}>Patient Information</strong>
                     <div
@@ -596,6 +913,49 @@ export default function Reports() {
                     </p>
                   </div>
 
+                  {(r.doctor_note || editingNotes[r.id]) && (
+                    <div
+                      id={`doctor-note-${r.id}`}
+                      className="report-next-step"
+                      style={{ marginTop: 14 }}
+                    >
+                      <strong style={{ color: "#4a9ff5" }}>Doctor Note</strong>
+                      {editingNotes[r.id] && isDoctor ? (
+                        <>
+                          <textarea
+                            className="q-input"
+                            style={{ width: "100%", minHeight: 88, marginTop: 8 }}
+                            value={noteDrafts[r.id] ?? ""}
+                            onChange={(e) =>
+                              setNoteDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))
+                            }
+                            placeholder="Add doctor note for patient follow-up..."
+                          />
+                          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                            <button className="btn btn-cta" onClick={() => saveDoctorNote(r)}>
+                              Save Note
+                            </button>
+                            <button className="btn btn-cta" onClick={() => cancelEditDoctorNote(r.id)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p className="muted" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
+                            {r.doctor_note}
+                          </p>
+                          {(r.doctor_note_by || r.doctor_note_updated_at) && (
+                            <p className="muted" style={{ marginTop: 4, fontSize: "0.85rem" }}>
+                              {r.doctor_note_by ? `By ${r.doctor_note_by}` : ""}
+                              {r.doctor_note_updated_at ? ` • ${fmtDate(r.doctor_note_updated_at)}` : ""}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   <p className="muted" style={{ marginTop: 8 }}>
                     {r.notes}
                   </p>
@@ -621,6 +981,14 @@ export default function Reports() {
                   >
                     Delete
                   </button>
+                  {isDoctor && !editingNotes[r.id] && (
+                    <button
+                      className="btn btn-cta"
+                      onClick={() => beginEditDoctorNote(r)}
+                    >
+                      Add Doctor Note
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
