@@ -346,6 +346,15 @@ def _parse_number_word_0_10(text: str) -> Optional[float]:
         if re.search(rf"\b{re.escape(w)}\b", low):
             return float(n)
 
+    # Common shorthand/typos seen in intake responses.
+    alias_words = {
+        "zer": 0,
+        "won": 1,
+    }
+    for w, n in alias_words.items():
+        if re.search(rf"\b{re.escape(w)}\b", low):
+            return float(n)
+
     fuzzy = _fuzzy_match_token(low, list(word_to_num.keys()), cutoff=0.78)
     if fuzzy:
         return float(word_to_num[fuzzy])
@@ -355,6 +364,14 @@ def _parse_number_word_0_10(text: str) -> Optional[float]:
 
 def _parse_symptom_scale(s: str) -> Optional[float]:
     t = (s or "").strip().lower()
+
+    # Border descriptors commonly used by users.
+    if t in {"regular", "smooth", "even"}:
+        return 0.0
+
+    # Negative symptom phrases should map to 0 in 0-10 contexts.
+    if _is_negative_or_none_phrase(t):
+        return 0.0
 
     # direct number
     try:
@@ -499,6 +516,7 @@ def _is_explanation_request(text: str) -> bool:
         r"\bexample\b",
         r"\bnot sure what\b",
         r"\bwhat mean\b",
+        r"^\s*what\s+(nodular|raised|flat|asymmetry|asymmetric|symmetry|border|irregular|itch|itching|pain|crusting|bleeding|diameter|mm)\b",
     ]
     return any(re.search(p, low) for p in patterns)
 
@@ -529,6 +547,32 @@ def _is_unsure(text: str) -> bool:
         "unknown",
         "maybe",
     }
+
+
+def _is_negative_or_none_phrase(text: str) -> bool:
+    low = re.sub(r"[^a-z\s]", " ", str(text or "").lower())
+    low = re.sub(r"\s+", " ", low).strip()
+    if not low:
+        return False
+
+    negatives = {
+        "no",
+        "nope",
+        "nah",
+        "none",
+        "nothing",
+        "not at all",
+        "no symptom",
+        "no symptoms",
+        "no pain",
+        "no itch",
+    }
+    if low in negatives:
+        return True
+
+    # Allow slight misspellings like "nopr".
+    fuzzy = _fuzzy_match_token(low, sorted(negatives), cutoff=0.74)
+    return fuzzy is not None
 
 
 def _build_slot_help(slot: str, user_text: str) -> str:
@@ -585,7 +629,7 @@ def _normalize_choice(text: str, choices: List[str]) -> Optional[str]:
     aliases = {
         "flat": {"flat", "flaat"},
         "raised": {"raised", "raise", "rasied", "raized"},
-        "nodular": {"nodular", "nodule", "bumpy", "bump-like"},
+        "nodular": {"nodular", "nodule", "bumpy", "bump-like", "bump", "rounded bump"},
     }
 
     for canonical, vals in aliases.items():
@@ -620,6 +664,7 @@ def _parse_evolution_speed(text: str) -> Optional[str]:
         r"\bsame\b",
         r"\bstable\b",
         r"\bnone\b",
+        r"\bnothing\b",
         r"\bno\b",
     ]
     if any(re.search(p, low) for p in stable_patterns):
@@ -678,7 +723,8 @@ def _infer_pending_from_last_bot(state: "ConvState") -> None:
     t = txt.lower()
 
     if "changing recently" in t or "changed noticeably" in t or "past few weeks or months" in t:
-        state.pending_slot = "evolution_speed"
+        if state.slots.get("evolution_speed") is None and state.slots.get("rapid_change") is None:
+            state.pending_slot = "evolution_speed"
     elif "has it bled" in t or ("bled" in t and "crust" not in t):
         state.pending_slot = "bleeding"
     elif "crust" in t or "scab" in t:
@@ -754,6 +800,10 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
             state.slots["itching_0_10"] = None
             state.pending_slot = None
             return True
+        if _is_negative_or_none_phrase(ut):
+            state.slots["itching_0_10"] = 0.0
+            state.pending_slot = None
+            return True
         v = _parse_symptom_scale(ut)
         if v is not None:
             state.slots["itching_0_10"] = v
@@ -764,6 +814,10 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
     if slot == "pain":
         if _is_unsure(ut):
             state.slots["pain_0_10"] = None
+            state.pending_slot = None
+            return True
+        if _is_negative_or_none_phrase(ut):
+            state.slots["pain_0_10"] = 0.0
             state.pending_slot = None
             return True
         v = _parse_symptom_scale(ut)
@@ -847,6 +901,10 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
             n = word_to_num[low]
         elif low in {"three+", "3+", "three or more", "3 or more", "more than three"}:
             n = 3
+        elif re.search(r"\bjust\s+one\b", low):
+            n = 1
+        elif low in {"to", "too"}:
+            n = 2
         else:
             m = re.search(r"\b\d+\b", low)
             if m:
@@ -856,6 +914,16 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
                     if re.search(rf"\b{re.escape(w)}\b", low):
                         n = v
                         break
+                if n is None:
+                    fuzzy = _fuzzy_match_token(low, list(word_to_num.keys()) + ["won", "zer", "to", "too"], cutoff=0.74)
+                    if fuzzy == "won":
+                        n = 1
+                    elif fuzzy == "zer":
+                        n = 0
+                    elif fuzzy in {"to", "too", "two"}:
+                        n = 2
+                    elif fuzzy in word_to_num:
+                        n = word_to_num[fuzzy]
 
         if n is not None and n >= 1:
             state.slots["number_of_colors"] = float(n)
@@ -1120,15 +1188,16 @@ def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
             }
             disease_fact = get_facts_for(str(top.get("code") or ""))
 
-    top_preds = _normalize_top_prediction_confidences(top_preds)
     if top_preds:
         top = top_preds[0]
         if not most_likely:
             most_likely = {
                 "code": top.get("code"),
                 "name": top.get("label"),
+                "probability": float(top.get("confidence", 0.0) or 0.0),
             }
-        most_likely["probability"] = float(top.get("confidence", 0.0) or 0.0)
+        elif most_likely.get("probability") is None:
+            most_likely["probability"] = float(top.get("confidence", 0.0) or 0.0)
 
     needed = []
     if payload.get("body_site") in (None, ""):

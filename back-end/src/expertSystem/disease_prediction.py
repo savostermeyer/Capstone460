@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import exp
 from typing import Any, Dict, List, Tuple
+import os
 
 
 # HAM10000 class keys used in the current backend model
@@ -48,8 +49,8 @@ class ExpertConfig:
     softmax_temperature: float = 1.0
     # Keep image model dominant by default; increase expert influence only when symptoms are strongly suspicious.
     model_weight: float = 0.90
-    expert_weight: float = 0.25
-    max_expert_weight: float = 0.55
+    expert_weight: float = 0.10
+    max_expert_weight: float = 0.25
     min_model_weight: float = 0.75
     epsilon: float = 1e-9
 
@@ -139,7 +140,19 @@ def _normalize_distribution(dist: Dict[str, float]) -> Dict[str, float]:
     return {c: clean[c] / total for c in HAM10000_CLASSES}
 
 
+def _prob_debug_enabled() -> bool:
+    # Enabled by default for auditability; set SKINDERELLA_PROB_DEBUG=0 to silence.
+    return str(os.getenv("SKINDERELLA_PROB_DEBUG", "1")).strip().lower() not in {"0", "false", "off", "no"}
+
+
+def _prob_debug(label: str, payload: Any) -> None:
+    if _prob_debug_enabled():
+        print(f"{label} {payload}")
+
+
 def _coerce_model_probabilities(model_probs: Any) -> Dict[str, float]:
+    _prob_debug("RAW_MODEL_PROBS:", model_probs)
+
     if isinstance(model_probs, list):
         merged: Dict[str, float] = {}
         for item in model_probs:
@@ -153,7 +166,9 @@ def _coerce_model_probabilities(model_probs: Any) -> Dict[str, float]:
                 merged[key] = float(value)
             except Exception:
                 continue
-        return _normalize_distribution(merged)
+        mapped = _normalize_distribution(merged)
+        _prob_debug("MAPPED_MODEL_PROBS:", mapped)
+        return mapped
 
     if isinstance(model_probs, dict):
         merged = {}
@@ -165,21 +180,18 @@ def _coerce_model_probabilities(model_probs: Any) -> Dict[str, float]:
                 merged[key] = float(raw_value)
             except Exception:
                 continue
-        return _normalize_distribution(merged)
+        mapped = _normalize_distribution(merged)
+        _prob_debug("MAPPED_MODEL_PROBS:", mapped)
+        return mapped
 
-    return {c: 1.0 / len(HAM10000_CLASSES) for c in HAM10000_CLASSES}
+    fallback = {c: 1.0 / len(HAM10000_CLASSES) for c in HAM10000_CLASSES}
+    _prob_debug("MAPPED_MODEL_PROBS:", fallback)
+    return fallback
 
 
 def _init_scores() -> Dict[str, float]:
-    return {
-        "mel": 0.10,
-        "nv": 0.05,
-        "bcc": 0.02,
-        "akiec": 0.01,
-        "bkl": 0.01,
-        "df": 0.00,
-        "vasc": 0.00,
-    }
+    # Neutral baseline so missing symptom fields do not imply suspicion by default.
+    return {c: 0.0 for c in HAM10000_CLASSES}
 
 
 def _add(
@@ -463,20 +475,35 @@ def combine_probabilities(
     cfg: ExpertConfig | None = None,
 ) -> Dict[str, float]:
     """
-    Product-of-experts fusion:
-      combined ~ model^model_weight * expert^expert_weight
+    Weighted-average fusion:
+      combined = model_weight * model + expert_weight * expert
     Then normalized to sum=1.
     """
     config = cfg or ExpertConfig()
-    eps = config.epsilon
+    mw = max(0.0, float(config.model_weight))
+    ew = max(0.0, float(config.expert_weight))
+    norm = mw + ew
+    if norm <= 0:
+        mw, ew, norm = 0.9, 0.1, 1.0
 
     combined_raw: Dict[str, float] = {}
     for cls in HAM10000_CLASSES:
-        m = max(eps, float(model_probabilities.get(cls, 0.0) or 0.0))
-        e = max(eps, float(expert_probabilities.get(cls, 0.0) or 0.0))
-        combined_raw[cls] = (m ** config.model_weight) * (e ** config.expert_weight)
+        m = max(0.0, float(model_probabilities.get(cls, 0.0) or 0.0))
+        e = max(0.0, float(expert_probabilities.get(cls, 0.0) or 0.0))
+        combined_raw[cls] = ((mw * m) + (ew * e)) / norm
 
-    return _normalize_distribution(combined_raw)
+    _prob_debug("FUSED_BEFORE_NORMALIZE:", combined_raw)
+    final_probs = _normalize_distribution(combined_raw)
+    _prob_debug("FINAL_FULL_DISTRIBUTION:", final_probs)
+    _prob_debug("FINAL_SUM:", sum(final_probs.values()))
+    return final_probs
+
+
+def _normalize_top3_for_display(top3: List[Tuple[str, float]]) -> List[Dict[str, float]]:
+    total = sum(max(0.0, float(prob or 0.0)) for _, prob in top3)
+    if total <= 0:
+        return [{"code": cls, "share": 0.0} for cls, _ in top3]
+    return [{"code": cls, "share": max(0.0, float(prob or 0.0)) / total} for cls, prob in top3]
 
 
 def _top_reasoning_text(
@@ -513,16 +540,23 @@ def build_expert_fusion_output(
     """
     config = cfg or ExpertConfig()
     model_distribution = _coerce_model_probabilities(model_probs)
+    model_top_conf = max(model_distribution.values()) if model_distribution else 0.0
 
     expert_out = compute_expert_probabilities(
         symptoms,
         temperature=config.softmax_temperature,
     )
     expert_distribution = _normalize_distribution(expert_out["probabilities"])
+    _prob_debug("EXPERT_PROBS:", expert_distribution)
 
     suspicion = _suspicion_strength(symptoms)
     effective_expert_weight = config.expert_weight + (config.max_expert_weight - config.expert_weight) * suspicion
     effective_model_weight = config.model_weight - (config.model_weight - config.min_model_weight) * suspicion
+
+    # If image confidence is very high and symptoms are low-risk/neutral, keep image dominance stronger.
+    if model_top_conf >= 0.90 and suspicion <= 0.20:
+        effective_model_weight = max(effective_model_weight, 0.92)
+        effective_expert_weight = min(effective_expert_weight, 0.08)
 
     fuse_cfg = ExpertConfig(
         softmax_temperature=config.softmax_temperature,
@@ -541,16 +575,20 @@ def build_expert_fusion_output(
 
     best_class = max(final_distribution, key=final_distribution.get)
     top3 = _top_items(final_distribution, n=3)
+    display_top3 = _normalize_top3_for_display(top3)
+    _prob_debug("TOP3_RAW:", top3)
+    _prob_debug("TOP3_DISPLAY:", display_top3)
 
     explanation = {
         "method": (
             "Rule-based symptom scoring -> softmax expert probabilities -> "
-            "product-of-experts fusion with CNN probabilities"
+            "weighted-average fusion with CNN probabilities"
         ),
         "fusion_weights": {
             "model_weight": round(effective_model_weight, 4),
             "expert_weight": round(effective_expert_weight, 4),
             "suspicion_strength": round(suspicion, 4),
+            "model_top_confidence": round(model_top_conf, 4),
         },
         "top_class_reasons": _top_reasoning_text(
             expert_out["reasons_by_disease"],
@@ -566,6 +604,10 @@ def build_expert_fusion_output(
         "model_probabilities": {k: round(v, 6) for k, v in model_distribution.items()},
         "expert_probabilities": {k: round(v, 6) for k, v in expert_distribution.items()},
         "final_combined_probabilities": {k: round(v, 6) for k, v in final_distribution.items()},
+        # Explicitly expose top-3 display shares to avoid mixing presentation with model logic.
+        "top_3_display_shares": [
+            {"code": item["code"], "share": round(item["share"], 6)} for item in display_top3
+        ],
         "most_likely_disease": {
             "code": best_class,
             "name": CLASS_DISPLAY.get(best_class, best_class),

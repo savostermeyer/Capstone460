@@ -259,6 +259,41 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
   console.warn("Could not attach upload form data to chat:", err);
 }
 
+    // Attach latest image-model probabilities so backend fusion can stay image-anchored.
+    try {
+      const rawAnalysis = localStorage.getItem("lastAnalysis");
+      if (rawAnalysis) {
+        const last = JSON.parse(rawAnalysis);
+        const preds =
+          last?.analysis?.top_predictions ||
+          last?.analysis?.model_topk ||
+          last?.raw_full?.top_predictions ||
+          [];
+
+        if (Array.isArray(preds) && preds.length > 0) {
+          const modelTopk = preds
+            .map((p) => ({
+              label: p?.label || p?.name,
+              prob: p?.confidence ?? p?.prob ?? p?.score ?? 0,
+            }))
+            .filter((p) => p.label);
+
+          if (modelTopk.length > 0) {
+            formData.append("model_topk", JSON.stringify(modelTopk));
+
+            // Also send direct map for robustness in backend extraction.
+            const classifierProbs = {};
+            modelTopk.forEach((p) => {
+              classifierProbs[String(p.label).toLowerCase()] = Number(p.prob) || 0;
+            });
+            formData.append("classifier_probs", JSON.stringify(classifierProbs));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Could not attach lastAnalysis model probabilities to chat:", err);
+    }
+
     // Exponential backoff retry for rate-limit errors
     const maxRetries = 3;
     let attempt = 0;

@@ -244,6 +244,32 @@ def analyze_skin():
 
         chat_message = _analysis_to_chat_message(pipeline_result)
 
+        # Seed canonical classifier probabilities into session state so later /chat turns
+        # can keep image-informed predictions even if model_topk is not resent.
+        topk_seed = (pipeline_result.get("ml", {}) or {}).get("topK", []) or []
+        clf_seed = {}
+        for p in topk_seed:
+            if not isinstance(p, dict):
+                continue
+            key = str(p.get("label") or "").strip().lower()
+            if not key:
+                continue
+            try:
+                clf_seed[key] = float(p.get("prob", p.get("confidence", 0.0)) or 0.0)
+            except Exception:
+                continue
+        if clf_seed:
+            st.slots["classifier_probs"] = clf_seed
+
+        # Seed intake fields when available for better continuity across chat turns.
+        if upload_fields.get("location"):
+            st.slots["body_site"] = upload_fields.get("location")
+        if upload_fields.get("age") not in (None, ""):
+            try:
+                st.slots["patient_age"] = float(upload_fields.get("age"))
+            except Exception:
+                pass
+
         st.history.append({
             "role": "model",
             "parts": [{"text": chat_message}]
