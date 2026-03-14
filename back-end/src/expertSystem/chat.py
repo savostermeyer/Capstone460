@@ -129,6 +129,102 @@ def _norm_meta(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return m
 
 
+def _coerce_prob(value: Any) -> Optional[float]:
+    try:
+        num = float(value)
+    except Exception:
+        return None
+
+    if num < 0:
+        num = 0.0
+    # Accept either 0..1 probabilities or 0..100 percentages.
+    if num > 1.0 and num <= 100.0:
+        num = num / 100.0
+    return min(num, 1.0)
+
+
+def _canonical_label_key(label: Any) -> Optional[str]:
+    if label is None:
+        return None
+
+    raw = str(label).strip().lower()
+    if not raw:
+        return None
+
+    compact = re.sub(r"[^a-z0-9]+", "", raw)
+    aliases = {
+        "mel": "mel",
+        "melanoma": "mel",
+        "nv": "nv",
+        "nevus": "nv",
+        "melanocyticnevus": "nv",
+        "melanocyticnaevus": "nv",
+        "bcc": "bcc",
+        "basalcellcarcinoma": "bcc",
+        "scc": "scc",
+        "squamouscellcarcinoma": "scc",
+        "bkl": "bkl",
+        "benignkeratosis": "bkl",
+        "seborrheickeratosis": "bkl",
+        "df": "df",
+        "dermatofibroma": "df",
+        "vasc": "vasc",
+        "vascularlesion": "vasc",
+        "akiec": "akiec",
+        "actinickeratosesandintraepithelialcarcinoma": "akiec",
+    }
+    return aliases.get(compact)
+
+
+def _extract_classifier_probs(metadata: Dict[str, Any]) -> Dict[str, float]:
+    # Prefer explicit classifier_probs if provided.
+    direct = metadata.get("classifier_probs")
+    if isinstance(direct, str):
+        try:
+            direct = json.loads(direct)
+        except Exception:
+            direct = {}
+
+    out: Dict[str, float] = {}
+    if isinstance(direct, dict):
+        for key, value in direct.items():
+            prob = _coerce_prob(value)
+            if prob is None:
+                continue
+            out[str(key).strip().lower()] = prob
+        if out:
+            return out
+
+    # Fallback: derive from top-k arrays sent by upload page.
+    seq = (
+        metadata.get("model_topk")
+        or metadata.get("top_predictions")
+        or metadata.get("predictions")
+        or []
+    )
+    if isinstance(seq, str):
+        try:
+            seq = json.loads(seq)
+        except Exception:
+            seq = []
+
+    if not isinstance(seq, list):
+        return {}
+
+    for item in seq:
+        if not isinstance(item, dict):
+            continue
+        key = _canonical_label_key(item.get("label") or item.get("name"))
+        if not key:
+            continue
+        prob = _coerce_prob(item.get("confidence", item.get("prob", item.get("probability", item.get("score")))))
+        if prob is None:
+            continue
+        out[key] = prob
+
+    return out
+
+
 def _parse_yes_no(s: str) -> Optional[bool]:
     t = (s or "").strip().lower()
     if t in {"yes", "y"}:
@@ -841,13 +937,8 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
             "pending_slot": state.pending_slot,
         }
 
-    if metadata and "classifier_probs" in metadata:
-        raw = metadata["classifier_probs"]
-        if isinstance(raw, str):
-            try:
-                metadata["classifier_probs"] = json.loads(raw)
-            except Exception:
-                metadata["classifier_probs"] = {}
+    if metadata:
+        metadata["classifier_probs"] = _extract_classifier_probs(metadata)
 
     if metadata:
         if metadata.get("body_site"):
