@@ -358,6 +358,67 @@ def _parse_symptom_scale(s: str) -> Optional[float]:
     return None
 
 
+def _parse_positive_number_from_text(text: str) -> Optional[float]:
+    t = (text or "").strip().lower()
+    if not t:
+        return None
+
+    # Direct numeric value, e.g. "5" or "12.5"
+    try:
+        n = float(t)
+        return n if n > 0 else None
+    except Exception:
+        pass
+
+    # Numeric value embedded in free text, e.g. "about 5 mm"
+    m = re.search(r"\b(\d{1,3}(?:\.\d+)?)\b", t)
+    if m:
+        try:
+            n = float(m.group(1))
+            return n if n > 0 else None
+        except Exception:
+            pass
+
+    # Word/typo word support for 0..10 words, e.g. "five" or "fiv"
+    n_word = _parse_number_word_0_10(t)
+    if n_word is not None and n_word > 0:
+        return float(n_word)
+
+    return None
+
+
+def _normalize_top_prediction_confidences(preds: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    top = list(preds or [])[:3]
+    if not top:
+        return []
+
+    vals: List[float] = []
+    for p in top:
+        try:
+            vals.append(max(0.0, float(p.get("confidence", 0.0) or 0.0)))
+        except Exception:
+            vals.append(0.0)
+
+    total = sum(vals)
+    if total <= 0:
+        even = 1.0 / len(top)
+        norm_vals = [even] * len(top)
+    else:
+        norm_vals = [v / total for v in vals]
+
+    # Keep numerical stability so values sum to exactly 1.0
+    if len(norm_vals) >= 2:
+        partial = sum(norm_vals[:-1])
+        norm_vals[-1] = max(0.0, 1.0 - partial)
+
+    out: List[Dict[str, Any]] = []
+    for i, p in enumerate(top):
+        item = dict(p)
+        item["confidence"] = norm_vals[i]
+        out.append(item)
+    return out
+
+
 def _sanitize_assistant_text(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
@@ -710,14 +771,11 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
             state.pending_slot = None
             return True
 
-        m = re.search(r"(\d{1,3}(?:\.\d+)?)\s*(mm|millimeter|millimeters)?\b", low)
-        if m:
-            try:
-                state.slots["diameter_mm"] = float(m.group(1))
-                state.pending_slot = None
-                return True
-            except Exception:
-                pass
+        n = _parse_positive_number_from_text(low)
+        if n is not None:
+            state.slots["diameter_mm"] = n
+            state.pending_slot = None
+            return True
         return False
 
     return False
@@ -955,6 +1013,16 @@ def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "probability": float(top.get("confidence", 0.0) or 0.0),
             }
             disease_fact = get_facts_for(str(top.get("code") or ""))
+
+    top_preds = _normalize_top_prediction_confidences(top_preds)
+    if top_preds:
+        top = top_preds[0]
+        if not most_likely:
+            most_likely = {
+                "code": top.get("code"),
+                "name": top.get("label"),
+            }
+        most_likely["probability"] = float(top.get("confidence", 0.0) or 0.0)
 
     needed = []
     if payload.get("body_site") in (None, ""):
