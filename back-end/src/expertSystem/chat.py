@@ -4,6 +4,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from difflib import get_close_matches
 
 import os, json, time, re
 from collections.abc import Mapping
@@ -228,10 +229,53 @@ def _extract_classifier_probs(metadata: Dict[str, Any]) -> Dict[str, float]:
 def _parse_yes_no(s: str) -> Optional[bool]:
     t = re.sub(r"[^a-z\s]", " ", (s or "").strip().lower())
     t = re.sub(r"\s+", " ", t).strip()
-    if t in {"yes", "y", "yeah", "yep", "true", "affirmative", "sure", "ok", "okay"}:
+
+    yes_words = {"yes", "y", "yeah", "yep", "true", "affirmative", "sure", "ok", "okay"}
+    no_words = {"no", "n", "nope", "nah", "false", "negative"}
+
+    if t in yes_words:
         return True
-    if t in {"no", "n", "nope", "nah", "false", "negative"}:
+    if t in no_words:
         return False
+
+    # Accept common misspellings such as "yees" or "noo".
+    fuzzy = _fuzzy_match_token(t, sorted(yes_words | no_words), cutoff=0.86)
+    if fuzzy in yes_words:
+        return True
+    if fuzzy in no_words:
+        return False
+    return None
+
+
+def _fuzzy_match_token(text: str, candidates: List[str], cutoff: float = 0.82) -> Optional[str]:
+    cleaned = re.sub(r"[^a-z\s]", " ", str(text or "").lower())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return None
+
+    tokens = cleaned.split()
+    probes = tokens + [cleaned]
+
+    for probe in probes:
+        if probe in candidates:
+            return probe
+
+        # Normalize repeated letters (e.g., "yeees" -> "yes", "noo" -> "no").
+        squeezed = re.sub(r"(.)\1+", r"\1", probe)
+        if squeezed in candidates:
+            return squeezed
+
+        # Handle simple transpositions/anagram-like typos for short words (e.g., "fiev" -> "five").
+        if 3 <= len(probe) <= 7:
+            sorted_probe = "".join(sorted(probe))
+            for candidate in candidates:
+                if len(candidate) == len(probe) and "".join(sorted(candidate)) == sorted_probe:
+                    return candidate
+
+        hit = get_close_matches(probe, candidates, n=1, cutoff=cutoff)
+        if hit:
+            return hit[0]
+
     return None
 
 
@@ -260,6 +304,10 @@ def _parse_number_word_0_10(text: str) -> Optional[float]:
     for w, n in word_to_num.items():
         if re.search(rf"\b{re.escape(w)}\b", low):
             return float(n)
+
+    fuzzy = _fuzzy_match_token(low, list(word_to_num.keys()), cutoff=0.78)
+    if fuzzy:
+        return float(word_to_num[fuzzy])
 
     return None
 
@@ -443,6 +491,11 @@ def _normalize_choice(text: str, choices: List[str]) -> Optional[str]:
             return canonical
         if canonical in choices and any(re.search(rf"\b{re.escape(v)}\b", low) for v in vals):
             return canonical
+
+        if canonical in choices:
+            fuzzy = _fuzzy_match_token(low, list(vals), cutoff=0.80)
+            if fuzzy is not None:
+                return canonical
 
     return low if low in choices else None
 
