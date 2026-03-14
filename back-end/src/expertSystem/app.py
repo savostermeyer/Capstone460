@@ -51,6 +51,12 @@ from PIL import Image, ImageOps
 from expertSystem.chat import ConvState, step as chat_step
 import time
 from collections import deque
+from datetime import datetime
+
+try:
+    from bson import ObjectId
+except Exception:
+    ObjectId = None
 
 # ---------- Chatbot wiring ----------
 
@@ -405,6 +411,47 @@ def list_reports():
             d["id"] = str(d.pop("_id"))
             out.append(d)
         return jsonify(out)
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify(error=str(e)), 500
+
+
+@app.post("/reports/note")
+def update_report_note():
+    try:
+        if reports_coll is None:
+            return jsonify(error="Reports storage not configured"), 503
+
+        payload = request.get_json(force=True) or {}
+        report_id = str(payload.get("report_id") or "").strip()
+        doctor_note = str(payload.get("doctor_note") or "")
+        doctor_email = str(payload.get("doctor_email") or "doctor@skinai.com").strip().lower()
+
+        if not report_id:
+            return jsonify(error="report_id is required"), 400
+
+        update_doc = {
+            "$set": {
+                "doctor_note": doctor_note,
+                "doctor_note_by": doctor_email,
+                "doctor_note_updated_at": datetime.utcnow().isoformat(),
+            }
+        }
+
+        if ObjectId is not None:
+            try:
+                result = reports_coll.update_one({"_id": ObjectId(report_id)}, update_doc)
+            except Exception:
+                result = reports_coll.update_one({"id": report_id}, update_doc)
+        else:
+            result = reports_coll.update_one({"id": report_id}, update_doc)
+
+        if result.matched_count == 0:
+            return jsonify(error="Report not found"), 404
+
+        return jsonify({"ok": True})
     except Exception as e:
         import traceback
 

@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+const DOCTOR_LOGIN = {
+  email: "doctor@skinai.com",
+  password: "doctor123",
+};
+
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -19,6 +24,8 @@ export default function Login() {
   async function onSubmit(e) {
     e.preventDefault();
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     if (!email.trim() || !password.trim()) {
       setMsg("Please enter your email and password.");
       return;
@@ -30,6 +37,25 @@ export default function Login() {
     }
 
     setMsg(isSignup ? "Creating account..." : "Signing in…");
+
+    if (
+      !isSignup &&
+      normalizedEmail === DOCTOR_LOGIN.email &&
+      password === DOCTOR_LOGIN.password
+    ) {
+      try {
+        localStorage.setItem("skinai_user", DOCTOR_LOGIN.email);
+        localStorage.setItem("skinai_role", "doctor");
+      } catch (err) {
+        console.error("localStorage error:", err);
+      }
+
+      setMsg("Doctor access granted. Redirecting...");
+      setTimeout(() => {
+        navigate("/reports");
+      }, 500);
+      return;
+    }
 
     try {
       const endpoint = isSignup ? "/api/auth/register" : "/api/auth/login";
@@ -54,6 +80,7 @@ export default function Login() {
       // Store user in localStorage
       try {
         localStorage.setItem("skinai_user", email.trim());
+        localStorage.setItem("skinai_role", "patient");
       } catch (err) {
         console.error("localStorage error:", err);
       }
@@ -175,6 +202,12 @@ export default function Login() {
                   {isSignup ? "Sign in" : "Sign up"}
                 </button>
               </div>
+
+              {!isSignup && (
+                <p className="muted" style={{ margin: "6px 0 0", fontSize: "0.8rem" }}>
+                  Doctor demo login: {DOCTOR_LOGIN.email}
+                </p>
+              )}
             </div>
           </form>
         </div>
