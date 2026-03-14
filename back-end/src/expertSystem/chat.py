@@ -602,6 +602,72 @@ def _normalize_choice(text: str, choices: List[str]) -> Optional[str]:
     return low if low in choices else None
 
 
+def _parse_evolution_speed(text: str) -> Optional[str]:
+    low = re.sub(r"[^a-z\s]", " ", str(text or "").lower())
+    low = re.sub(r"\s+", " ", low).strip()
+    if not low:
+        return None
+
+    if _is_unsure(low):
+        return None
+
+    # Strong stable/no-change signals.
+    stable_patterns = [
+        r"\bno\s+change\b",
+        r"\bnot\s+changing\b",
+        r"\bunchanged\b",
+        r"\bthe\s+same\b",
+        r"\bsame\b",
+        r"\bstable\b",
+        r"\bnone\b",
+        r"\bno\b",
+    ]
+    if any(re.search(p, low) for p in stable_patterns):
+        return "stable"
+
+    # "nope" / "nah" also mean no meaningful change in this slot context.
+    yn = _parse_yes_no(low)
+    if yn is False:
+        return "stable"
+
+    slow_patterns = [
+        r"\ba\s+little\b",
+        r"\blittle\b",
+        r"\bslight\b",
+        r"\bslightly\b",
+        r"\bslow\b",
+        r"\bminor\b",
+    ]
+    if any(re.search(p, low) for p in slow_patterns):
+        return "slow"
+
+    rapid_patterns = [
+        r"\ba\s+lot\b",
+        r"\blot\b",
+        r"\brapid\b",
+        r"\bfast\b",
+        r"\bquick\b",
+        r"\bquickly\b",
+        r"\bmajor\b",
+    ]
+    if any(re.search(p, low) for p in rapid_patterns):
+        return "rapid"
+
+    fuzzy = _fuzzy_match_token(
+        low,
+        ["stable", "unchanged", "same", "slight", "slow", "rapid", "quick", "none"],
+        cutoff=0.78,
+    )
+    if fuzzy in {"stable", "unchanged", "same", "none"}:
+        return "stable"
+    if fuzzy in {"slight", "slow"}:
+        return "slow"
+    if fuzzy in {"rapid", "quick"}:
+        return "rapid"
+
+    return None
+
+
 def _infer_pending_from_last_bot(state: "ConvState") -> None:
     if not state.history:
         return
@@ -651,23 +717,18 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
     if slot == "evolution_speed":
         if _is_unsure(ut):
             state.slots["evolution_speed"] = None
+            state.slots["rapid_change"] = None
             state.pending_slot = None
             return True
 
-        norm = low.strip()
-
-        if norm in {"no", "none", "stable", "no change", "not changing"}:
-            state.slots["evolution_speed"] = "stable"
-            state.pending_slot = None
-            return True
-
-        if norm in {"a little", "little", "slight", "slightly", "slow"}:
-            state.slots["evolution_speed"] = "slow"
-            state.pending_slot = None
-            return True
-
-        if norm in {"a lot", "lot", "rapid", "fast", "quickly"}:
-            state.slots["evolution_speed"] = "rapid"
+        evo = _parse_evolution_speed(ut)
+        if evo is not None:
+            state.slots["evolution_speed"] = evo
+            # Canonical boolean mirror used by downstream checks/fusion.
+            if evo == "rapid":
+                state.slots["rapid_change"] = True
+            else:
+                state.slots["rapid_change"] = False
             state.pending_slot = None
             return True
 
@@ -1074,7 +1135,7 @@ def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
         needed.append("Where on the body is the spot located?")
     elif payload.get("diameter_mm") is None:
         needed.append("About how wide is it at the largest point (in mm)? A pencil eraser is about 6 mm.")
-    elif payload.get("evolution_speed") is None:
+    elif payload.get("evolution_speed") is None and payload.get("rapid_change") is None:
         needed.append("Has it been changing recently? (No / A little / A lot / Not sure)")
     elif payload.get("number_of_colors") is None:
         needed.append("How many colors do you see in the spot? (1, 2, 3+)")

@@ -46,8 +46,11 @@ CLASS_DISPLAY = {
 @dataclass
 class ExpertConfig:
     softmax_temperature: float = 1.0
-    model_weight: float = 0.70
-    expert_weight: float = 0.55
+    # Keep image model dominant by default; increase expert influence only when symptoms are strongly suspicious.
+    model_weight: float = 0.90
+    expert_weight: float = 0.25
+    max_expert_weight: float = 0.55
+    min_model_weight: float = 0.75
     epsilon: float = 1e-9
 
 
@@ -228,6 +231,48 @@ def _extract_body_site(symptoms: Dict[str, Any]) -> str:
 
 def _top_items(dist: Dict[str, float], n: int = 3) -> List[Tuple[str, float]]:
     return sorted(dist.items(), key=lambda x: x[1], reverse=True)[:n]
+
+
+def _suspicion_strength(symptoms: Dict[str, Any]) -> float:
+    """
+    Estimate symptom-based suspicion strength in [0, 1].
+    Higher values should allow expert rules to influence fusion more.
+    """
+    score = 0.0
+
+    if _to_bool(symptoms.get("bleeding")) is True:
+        score += 0.30
+    if _to_bool(symptoms.get("ulceration")) is True:
+        score += 0.30
+    if _to_bool(symptoms.get("crusting")) is True:
+        score += 0.15
+
+    rapid = _extract_rapid_change(symptoms)
+    if rapid is True:
+        score += 0.25
+
+    border_0_10 = _extract_border_0_10(symptoms)
+    if border_0_10 is not None:
+        if border_0_10 >= 7:
+            score += 0.20
+        elif border_0_10 >= 4:
+            score += 0.08
+
+    num_colors = _to_int(symptoms.get("num_colors", symptoms.get("number_of_colors")))
+    if num_colors is not None:
+        if num_colors >= 3:
+            score += 0.20
+        elif num_colors == 2:
+            score += 0.08
+
+    width_mm = _to_float(symptoms.get("width_mm", symptoms.get("diameter_mm")))
+    if width_mm is not None:
+        if width_mm >= 10:
+            score += 0.15
+        elif width_mm >= 6:
+            score += 0.08
+
+    return _clamp(score, 0.0, 1.0)
 
 
 def expert_rule_logits(symptoms: Dict[str, Any]) -> Tuple[Dict[str, float], Dict[str, List[str]]]:
@@ -475,10 +520,23 @@ def build_expert_fusion_output(
     )
     expert_distribution = _normalize_distribution(expert_out["probabilities"])
 
+    suspicion = _suspicion_strength(symptoms)
+    effective_expert_weight = config.expert_weight + (config.max_expert_weight - config.expert_weight) * suspicion
+    effective_model_weight = config.model_weight - (config.model_weight - config.min_model_weight) * suspicion
+
+    fuse_cfg = ExpertConfig(
+        softmax_temperature=config.softmax_temperature,
+        model_weight=effective_model_weight,
+        expert_weight=effective_expert_weight,
+        max_expert_weight=config.max_expert_weight,
+        min_model_weight=config.min_model_weight,
+        epsilon=config.epsilon,
+    )
+
     final_distribution = combine_probabilities(
         model_distribution,
         expert_distribution,
-        cfg=config,
+        cfg=fuse_cfg,
     )
 
     best_class = max(final_distribution, key=final_distribution.get)
@@ -489,6 +547,11 @@ def build_expert_fusion_output(
             "Rule-based symptom scoring -> softmax expert probabilities -> "
             "product-of-experts fusion with CNN probabilities"
         ),
+        "fusion_weights": {
+            "model_weight": round(effective_model_weight, 4),
+            "expert_weight": round(effective_expert_weight, 4),
+            "suspicion_strength": round(suspicion, 4),
+        },
         "top_class_reasons": _top_reasoning_text(
             expert_out["reasons_by_disease"],
             best_class,
