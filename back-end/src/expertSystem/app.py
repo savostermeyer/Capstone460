@@ -180,9 +180,7 @@ def _analysis_to_chat_message(pipeline_result: dict) -> str:
     return (
         f"{disclaimer}\n\n"
         f"Preliminary result: {primary}\n"
-        f"Top predictions: {preds}\n\n"
-        "To improve accuracy, I have one quick question:\n"
-        "Where on the body is this located? (e.g., left forearm)"
+        f"Top predictions: {preds}"
     )
 
 @app.post("/analyze_skin")
