@@ -16,6 +16,8 @@ print("[dotenv] file:", find_dotenv(usecwd=True))
 print("[env] GOOGLE_API_KEY?", bool(os.getenv("GOOGLE_API_KEY")))
 
 import google.generativeai as genai
+from expertSystem.disease_prediction import build_expert_fusion_output
+from expertSystem.disease_facts import get_facts_for
 
 
 # ---------------------------
@@ -911,19 +913,48 @@ def _get_prob(clf: Dict[str, Any], *keys: str) -> float:
 # ---------------------------
 def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
     clf = payload.get("classifier_probs") or {}
+    fusion_out: Dict[str, Any] = {}
+    top_preds: List[Dict[str, Any]] = []
+    most_likely: Dict[str, Any] = {}
+    disease_fact: Dict[str, Any] = {}
 
-    preds = [
-        {"label": "Melanoma", "confidence": round(_get_prob(clf, "melanoma", "mel"), 4)},
-        {"label": "Melanocytic nevus", "confidence": round(_get_prob(clf, "nevus", "nv"), 4)},
-        {"label": "Basal cell carcinoma", "confidence": round(_get_prob(clf, "bcc"), 4)},
-        {"label": "Squamous cell carcinoma", "confidence": round(_get_prob(clf, "scc"), 4)},
-        {"label": "Benign keratosis", "confidence": round(_get_prob(clf, "bkl"), 4)},
-        {"label": "Dermatofibroma", "confidence": round(_get_prob(clf, "df"), 4)},
-        {"label": "Vascular lesion", "confidence": round(_get_prob(clf, "vasc"), 4)},
-    ]
+    try:
+        fusion_out = build_expert_fusion_output(payload, clf)
+        top_preds = [
+            {
+                "label": str(item.get("name") or item.get("code") or "unknown"),
+                "confidence": float(item.get("probability", 0.0) or 0.0),
+                "code": str(item.get("code") or "").strip().lower(),
+            }
+            for item in (fusion_out.get("top_3_diseases") or [])
+        ]
+        most_likely = dict(fusion_out.get("most_likely_disease") or {})
+        top_code = str(most_likely.get("code") or "").strip().lower()
+        disease_fact = get_facts_for(top_code) if top_code else {}
+    except Exception as e:
+        print(f"[chat][rules] fusion fallback: {e}")
 
-    preds.sort(key=lambda x: x["confidence"], reverse=True)
-    top_preds = preds[:3]
+    if not top_preds:
+        preds = [
+            {"label": "Melanoma", "confidence": round(_get_prob(clf, "melanoma", "mel"), 4), "code": "mel"},
+            {"label": "Melanocytic nevus", "confidence": round(_get_prob(clf, "nevus", "nv"), 4), "code": "nv"},
+            {"label": "Basal cell carcinoma", "confidence": round(_get_prob(clf, "bcc"), 4), "code": "bcc"},
+            {"label": "Squamous cell carcinoma", "confidence": round(_get_prob(clf, "scc"), 4), "code": "scc"},
+            {"label": "Benign keratosis", "confidence": round(_get_prob(clf, "bkl"), 4), "code": "bkl"},
+            {"label": "Dermatofibroma", "confidence": round(_get_prob(clf, "df"), 4), "code": "df"},
+            {"label": "Vascular lesion", "confidence": round(_get_prob(clf, "vasc"), 4), "code": "vasc"},
+        ]
+
+        preds.sort(key=lambda x: x["confidence"], reverse=True)
+        top_preds = preds[:3]
+        if top_preds:
+            top = top_preds[0]
+            most_likely = {
+                "code": top.get("code"),
+                "name": top.get("label"),
+                "probability": float(top.get("confidence", 0.0) or 0.0),
+            }
+            disease_fact = get_facts_for(str(top.get("code") or ""))
 
     needed = []
     if payload.get("body_site") in (None, ""):
@@ -941,6 +972,9 @@ def _run_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "top_predictions": top_preds,
+        "most_likely_disease": most_likely,
+        "disease_fact": disease_fact,
+        "medical_reasoning": fusion_out.get("medical_reasoning", {}),
         "prediction_basis": "image classifier probabilities with intake refinement",
         "next_questions": needed[:1],
         "safety_flags": ["not_a_diagnosis"],
@@ -968,9 +1002,25 @@ def _format_report_bubble(payload: Dict[str, Any]) -> str:
     if not lines:
         return "I have enough information to continue, but I do not have a prediction summary yet."
 
+    most = payload.get("most_likely_disease") or {}
+    guess_name = str(most.get("name") or "").strip()
+    guess_prob = most.get("probability")
+    guess_line = ""
+    if guess_name:
+        try:
+            guess_line = f"Most likely guess: {guess_name} ({float(guess_prob):.2%})\n"
+        except Exception:
+            guess_line = f"Most likely guess: {guess_name}\n"
+
+    fact = payload.get("disease_fact") or {}
+    fact_desc = str(fact.get("description") or "").strip()
+    fact_line = f"About this condition: {fact_desc}\n" if fact_desc else ""
+
     return (
+        f"{guess_line}"
         "Prediction summary:\n"
         + "\n".join(lines)
+        + ("\n\n" + fact_line.strip() if fact_line else "")
     )
 
 
@@ -1193,6 +1243,9 @@ def step(state: ConvState, user_text: Optional[str], img, metadata: Optional[Dic
     }
     if tool_payload:
         out["top_predictions"] = tool_payload.get("top_predictions", [])
+        out["most_likely_disease"] = tool_payload.get("most_likely_disease", {})
+        out["disease_fact"] = tool_payload.get("disease_fact", {})
+        out["medical_reasoning"] = tool_payload.get("medical_reasoning", {})
         out["next_questions"] = tool_payload.get("next_questions", [])
         out["safety_flags"] = tool_payload.get("safety_flags", [])
         out["audit"] = tool_payload.get("audit", {})
