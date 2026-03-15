@@ -110,7 +110,7 @@ body {
   background: #151515;
 }
 .nav-link.active {
-  background: #f7eed7;
+  background: var(--gold);
   color: #111;
 }
 
@@ -535,13 +535,14 @@ body {
   border-radius: 10px;
   padding: 10px 16px;
   font-weight: 600;
-  color: var(--text);
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  color: #ededed;
+  background: #111;
+  border: 1px solid #444;
 }
 
 .btn-secondary:hover {
   background: #222;
+  border-color: #555;
 }
 
 /* Simple utility to hide elements */
@@ -585,7 +586,7 @@ body {
 .modal-actions {
   display: flex;
   gap: 10px;
-  justify-content: flex-end;
+  justify-content: center;
   flex-wrap: wrap;
 }
 

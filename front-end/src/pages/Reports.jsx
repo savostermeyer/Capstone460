@@ -1193,7 +1193,7 @@ export default function Reports() {
                 Log In
               </button>
               <button
-                className="btn btn-cta"
+                className="btn btn-secondary"
                 type="button"
                 onClick={() => navigate("/")}
               >

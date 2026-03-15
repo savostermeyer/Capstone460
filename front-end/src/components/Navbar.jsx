@@ -10,7 +10,7 @@ export default function Navbar() {
           </div>
           <div className="brand-text">
             <strong>SkinAI Classifier</strong>
-            <span>Purdue University</span>
+            <span>Purdue Fort Wayne</span>
           </div>
         </Link>
 
