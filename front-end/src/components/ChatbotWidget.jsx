@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const STORAGE_HISTORY = "skinai_chat_history";
+const STORAGE_HISTORY_PREFIX = "skinai_chat_history_";
 const STORAGE_OPEN = "skinai_chat_open";
 const STORAGE_SID = "skinai_sid";
+
+//Default message 
+const DEFAULT_MESSAGES = [
+  {
+    type: "bot",
+    text: "Hello! I'm Skinderella. You can upload images on the upload page or tell me your symptoms, and I'll guide your analysis.",
+  },
+];
+
 console.log("🔥 ChatbotWidget loaded from:", import.meta.url);
+
+
 
 function newSid() {
   return "sid_" + Math.random().toString(36).substring(2);
@@ -27,10 +38,15 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     }
   }, []);
 
+  const historyKey = `${STORAGE_HISTORY_PREFIX}${sid}`;
+  
+
+  
   // Backend API base URL from environment, fallback to localhost:3720
   const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3720").replace(/\/$/, "");
   const [backendUrl, setBackendUrl] = useState(`${API_BASE}/chat?sid=${sid}`);
 
+  
   // Open state (persisted)
   const [open, setOpen] = useState(() => {
     try {
@@ -41,28 +57,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
   });
 
   // History (persisted)
-  const [messages, setMessages] = useState(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_HISTORY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (parsed.length === 0) {
-        return [
-          {
-            type: "bot",
-            text: "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
-          },
-        ];
-      }
-      return parsed;
-    } catch {
-      return [
-        {
-          type: "bot",
-          text: "Hello! Im skinderella. You can upload images on the upload page or tell me your symptoms and I'll guid your analysis.",
-        },
-      ];
-    }
-  });
+  const [messages, setMessages] = useState(() => [...DEFAULT_MESSAGES]);
 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -77,12 +72,6 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     } catch {}
   }, [open]);
 
-  // Persist history
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_HISTORY, JSON.stringify(messages));
-    } catch {}
-  }, [messages]);
 
   // Auto-scroll
   useEffect(() => {
@@ -188,7 +177,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
 
   function resetChat() {
     try {
-      localStorage.removeItem(STORAGE_HISTORY);
+      localStorage.removeItem(historyKey);
     } catch {}
 
     const oldSid = sid;
@@ -206,10 +195,10 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
       }).catch((e) => console.warn("Could not reset backend session:", e));
     }
 
-    setMessages([
-      { type: "bot", text: "🔄 Chat reset. You can start a new conversation." },
-    ]);
+    setMessages([...DEFAULT_MESSAGES]);
     setInput("");
+    setImageFile(null);
+    if(fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function sendMessage() {
@@ -235,6 +224,75 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     formData.append("text", text);
     formData.append("page", "chat");
     if (hasImage) formData.append("image", imageFile);
+
+    try {
+  const raw = localStorage.getItem("skinai_upload_form");
+  if (raw) {
+    const uploadForm = JSON.parse(raw);
+
+    if (uploadForm.name) formData.append("name", uploadForm.name);
+    if (uploadForm.age) formData.append("age", String(uploadForm.age));
+    if (uploadForm.sex) formData.append("sex", uploadForm.sex);
+    if (uploadForm.skinType) formData.append("skinType", uploadForm.skinType);
+    if (uploadForm.location) formData.append("location", uploadForm.location);
+    if (uploadForm.duration) formData.append("duration_days", String(uploadForm.duration));
+    if (uploadForm.primarySymptoms?.length) {
+      formData.append("primarySymptoms", uploadForm.primarySymptoms.join(", "));
+    }
+    if (uploadForm.medicalBackground) {
+      formData.append("medicalBackground", uploadForm.medicalBackground);
+    }
+    if (uploadForm.familyHistory) {
+      formData.append("familyHistory", uploadForm.familyHistory);
+    }
+    if (uploadForm.sunExposure) {
+      formData.append("sunExposure", uploadForm.sunExposure);
+    }
+    if (uploadForm.spfUse) {
+      formData.append("spfUse", uploadForm.spfUse);
+    }
+    if (uploadForm.currentMedications) {
+      formData.append("currentMedications", uploadForm.currentMedications);
+    }
+  }
+} catch (err) {
+  console.warn("Could not attach upload form data to chat:", err);
+}
+
+    // Attach latest image-model probabilities so backend fusion can stay image-anchored.
+    try {
+      const rawAnalysis = localStorage.getItem("lastAnalysis");
+      if (rawAnalysis) {
+        const last = JSON.parse(rawAnalysis);
+        const preds =
+          last?.analysis?.top_predictions ||
+          last?.analysis?.model_topk ||
+          last?.raw_full?.top_predictions ||
+          [];
+
+        if (Array.isArray(preds) && preds.length > 0) {
+          const modelTopk = preds
+            .map((p) => ({
+              label: p?.label || p?.name,
+              prob: p?.confidence ?? p?.prob ?? p?.score ?? 0,
+            }))
+            .filter((p) => p.label);
+
+          if (modelTopk.length > 0) {
+            formData.append("model_topk", JSON.stringify(modelTopk));
+
+            // Also send direct map for robustness in backend extraction.
+            const classifierProbs = {};
+            modelTopk.forEach((p) => {
+              classifierProbs[String(p.label).toLowerCase()] = Number(p.prob) || 0;
+            });
+            formData.append("classifier_probs", JSON.stringify(classifierProbs));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Could not attach lastAnalysis model probabilities to chat:", err);
+    }
 
     // Exponential backoff retry for rate-limit errors
     const maxRetries = 3;
