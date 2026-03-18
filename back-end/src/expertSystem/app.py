@@ -25,6 +25,7 @@
 
 import os
 import sys
+import io
 from pathlib import Path
 from keras_predictor import KerasResNetPredictor
 from dotenv import load_dotenv
@@ -189,6 +190,46 @@ def _analysis_to_chat_message(pipeline_result: dict) -> str:
         f"Top predictions: {preds}"
     )
 
+
+def _build_upload_fields(form: dict) -> dict:
+    """Normalize incoming form keys into the pipeline's expected upload fields."""
+    age = form.get("age") or form.get("patient_age")
+    location = form.get("location") or form.get("body_site")
+    sex = form.get("sex_at_birth") or form.get("sex")
+    duration_days = form.get("duration_days") or form.get("duration")
+
+    return {
+        "age": age,
+        "sex_at_birth": sex,
+        "location": location,
+        "duration_days": duration_days,
+    }
+
+
+def _build_chat_flags(form: dict) -> dict:
+    """Normalize optional symptom flags used by the expert pipeline."""
+    return {
+        "rapid_change": form.get("rapid_change"),
+        "bleeding": form.get("bleeding"),
+        "itching": form.get("itching"),
+        "pain": form.get("pain"),
+    }
+
+
+def _classifier_probs_from_topk(topk: list) -> dict:
+    probs = {}
+    for p in topk or []:
+        if not isinstance(p, dict):
+            continue
+        key = str(p.get("label") or "").strip().lower()
+        if not key:
+            continue
+        try:
+            probs[key] = float(p.get("prob", p.get("confidence", 0.0)) or 0.0)
+        except Exception:
+            continue
+    return probs
+
 @app.post("/analyze_skin")
 def analyze_skin():
     """
@@ -221,21 +262,11 @@ def analyze_skin():
         image_bytes = f.read()
 
         # Extract patient intake fields
-        upload_fields = {
-            "age": request.form.get("age"),
-            "sex_at_birth": request.form.get("sex_at_birth"),
-            "location": request.form.get("location"),
-            "duration_days": request.form.get("duration_days"),
-        }
+        upload_fields = _build_upload_fields(request.form)
         
 
         # Extract chat/symptom flags
-        chat_flags = {
-            "rapid_change": request.form.get("rapid_change"),
-            "bleeding": request.form.get("bleeding"),
-            "itching": request.form.get("itching"),
-            "pain": request.form.get("pain"),
-        }
+        chat_flags = _build_chat_flags(request.form)
 
         # Run the expert pipeline
         pipeline_result = run_expert_pipeline(
@@ -253,17 +284,7 @@ def analyze_skin():
         # Seed canonical classifier probabilities into session state so later /chat turns
         # can keep image-informed predictions even if model_topk is not resent.
         topk_seed = (pipeline_result.get("ml", {}) or {}).get("topK", []) or []
-        clf_seed = {}
-        for p in topk_seed:
-            if not isinstance(p, dict):
-                continue
-            key = str(p.get("label") or "").strip().lower()
-            if not key:
-                continue
-            try:
-                clf_seed[key] = float(p.get("prob", p.get("confidence", 0.0)) or 0.0)
-            except Exception:
-                continue
+        clf_seed = _classifier_probs_from_topk(topk_seed)
         if clf_seed:
             st.slots["classifier_probs"] = clf_seed
 
@@ -553,11 +574,52 @@ def chat():
         img_file = request.files.get("image")
 
         img = None
+        image_bytes = None
         if img_file and img_file.filename:
-            img = Image.open(img_file.stream).convert("RGB")
+            image_bytes = img_file.read()
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
         # capture all other metadata from the intake form
         metadata = {k: v for k, v in request.form.items() if k not in ("text",)}
+
+        # If the chat request includes an image, run the same image-processing path used
+        # by /analyze_skin so downstream expert fusion remains image-anchored.
+        if image_bytes:
+            try:
+                upload_fields = _build_upload_fields(request.form)
+                chat_flags = _build_chat_flags(request.form)
+                pipeline_result = run_expert_pipeline(
+                    image_bytes=image_bytes,
+                    upload_fields=upload_fields,
+                    chat_flags=chat_flags,
+                    predictor=KerasResNetPredictor(),
+                )
+                topk_seed = (pipeline_result.get("ml", {}) or {}).get("topK", []) or []
+                clf_seed = _classifier_probs_from_topk(topk_seed)
+
+                if topk_seed:
+                    metadata["model_topk"] = topk_seed
+                if clf_seed:
+                    metadata["classifier_probs"] = clf_seed
+                    st.slots["classifier_probs"] = clf_seed
+
+                if upload_fields.get("location"):
+                    st.slots["body_site"] = upload_fields.get("location")
+                    metadata["body_site"] = upload_fields.get("location")
+                if upload_fields.get("age") not in (None, ""):
+                    try:
+                        age_val = float(upload_fields.get("age"))
+                        st.slots["patient_age"] = age_val
+                        metadata["patient_age"] = age_val
+                    except Exception:
+                        pass
+
+                if not user_text:
+                    user_text = "I uploaded an image for analysis."
+
+                print("[CHAT] Image pipeline topK:", topk_seed)
+            except Exception as e:
+                print("[CHAT] Image pipeline failed:", e)
         print("[CHAT] Session:", sid)
         print("[CHAT] Metadata received:", metadata)
         print("[CHAT] Text:", user_text)
