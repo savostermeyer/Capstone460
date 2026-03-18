@@ -1,3 +1,4 @@
+import { useState } from "react";
 import damianPic from "../assets/damianpic.jpeg";
 import sriPic from "../assets/sripic.jpeg";
 import savPic from "../assets/savpic.jpeg";
@@ -13,6 +14,8 @@ const teamMembers = [
 ];
 
 export default function Team() {
+  const [flippedCards, setFlippedCards] = useState({});
+
   const images = {
     dw: damianPic,
     sy: sriPic,
@@ -23,6 +26,137 @@ export default function Team() {
 
   const topMembers = teamMembers.slice(0, 3);
   const bottomMembers = teamMembers.slice(3);
+
+  const toggleCard = (memberId) => {
+    setFlippedCards((prev) => ({
+      ...prev,
+      [memberId]: !prev[memberId],
+    }));
+  };
+
+  const renderFlippableCard = (member, cardWidth) => (
+    <div
+      key={member.id}
+      style={{
+        perspective: "1200px",
+        width: cardWidth || "100%",
+        maxWidth: cardWidth ? 320 : undefined,
+        transition: "transform 0.22s ease",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = "translateY(-6px)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          height: 520,
+          transformStyle: "preserve-3d",
+          transition: "transform 0.6s ease",
+          transform: flippedCards[member.id] ? "rotateY(180deg)" : "rotateY(0deg)",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            border: "2px solid #d4af8a",
+            borderRadius: 14,
+            textAlign: "left",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            background: "#fff",
+            backfaceVisibility: "hidden",
+          }}
+        >
+          <div style={{ width: "100%", height: 420, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            <img src={images[member.id]} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 20%", display: "block" }} />
+          </div>
+          <div style={{ background: "#f5e6d3", padding: "16px", flex: 1, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, color: "#111", fontSize: "1.15rem", fontWeight: 800 }}>{member.name}</h3>
+              <p style={{ margin: "6px 0 0 0", color: "#422d00", fontWeight: 600, fontSize: "0.95rem" }}>{member.role}</p>
+            </div>
+            <button
+              type="button"
+              aria-label={`Flip ${member.name} card`}
+              onClick={() => toggleCard(member.id)}
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: "50%",
+                border: "1px solid #2a2a2a",
+                background: "#fff",
+                color: "#111",
+                cursor: "pointer",
+                fontSize: "0.95rem",
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              ↻
+            </button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            border: "2px solid #d4af8a",
+            borderRadius: 14,
+            textAlign: "left",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            background: "#f5e6d3",
+            transform: "rotateY(180deg)",
+            backfaceVisibility: "hidden",
+            padding: "20px 18px",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0, color: "#111", fontSize: "1.2rem", fontWeight: 800 }}>{member.name}</h3>
+            <p style={{ margin: "8px 0 14px 0", color: "#422d00", fontWeight: 700, fontSize: "0.95rem" }}>
+              What they did in this project
+            </p>
+            <p style={{ margin: 0, color: "#1f1f1f", lineHeight: 1.55, fontSize: "0.95rem" }}>
+              {member.description}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            aria-label={`Flip ${member.name} card back`}
+            onClick={() => toggleCard(member.id)}
+            style={{
+              alignSelf: "center",
+              width: 28,
+              height: 28,
+              borderRadius: "50%",
+              border: "1px solid #2a2a2a",
+              background: "#fff",
+              color: "#111",
+              cursor: "pointer",
+              fontSize: "0.95rem",
+              fontWeight: 700,
+              marginTop: 12,
+            }}
+          >
+            ↻
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <main className="container">
       <section className="section-pad" aria-labelledby="team-title">
@@ -52,38 +186,7 @@ export default function Team() {
             gap: 36,
             marginBottom: 28
           }}>
-            {topMembers.map(member => (
-              <div key={member.id} style={{
-                border: "2px solid #d4af8a",
-                borderRadius: 14,
-                padding: 0,
-                textAlign: "left",
-                boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
-                overflow: "hidden",
-                transition: "transform 0.22s ease, boxShadow 0.22s ease",
-                cursor: "default",
-                display: "flex",
-                flexDirection: "column",
-                height: 520,
-                background: "#fff"
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-6px)";
-                e.currentTarget.style.boxShadow = "0 12px 30px rgba(0,0,0,0.18)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.15)";
-              }}>
-                <div style={{ width: "100%", height: 420, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-                  <img src={images[member.id]} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 20%", display: "block" }} />
-                </div>
-                <div style={{ background: "#f5e6d3", padding: "18px 16px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                  <h3 style={{ margin: 0, color: "#111", fontSize: "1.15rem", fontWeight: 800 }}>{member.name}</h3>
-                  <p style={{ margin: "6px 0 0 0", color: "#422d00", fontWeight: 600, fontSize: "0.9rem" }}>{member.role}</p>
-                </div>
-              </div>
-            ))}
+            {topMembers.map((member) => renderFlippableCard(member))}
           </div>
 
           {/* Bottom row: centered 2 cards */}
@@ -95,40 +198,7 @@ export default function Team() {
           }}>
             <div />
             <div style={{ display: "flex", gap: 36, justifyContent: "center" }}>
-              {bottomMembers.map(member => (
-                <div key={member.id} style={{
-                  width: "100%",
-                  maxWidth: 320,
-                  border: "2px solid #d4af8a",
-                  borderRadius: 14,
-                  padding: 0,
-                  textAlign: "left",
-                  boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
-                  overflow: "hidden",
-                  transition: "transform 0.22s ease, boxShadow 0.22s ease",
-                  cursor: "default",
-                  display: "flex",
-                  flexDirection: "column",
-                  height: 520,
-                  background: "#fff"
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-6px)";
-                  e.currentTarget.style.boxShadow = "0 12px 30px rgba(0,0,0,0.18)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.15)";
-                }}>
-                  <div style={{ width: "100%", height: 420, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
-                    <img src={images[member.id]} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 20%", display: "block" }} />
-                  </div>
-                  <div style={{ background: "#f5e6d3", padding: "20px 18px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                    <h3 style={{ margin: 0, color: "#111", fontSize: "1.2rem", fontWeight: 800 }}>{member.name}</h3>
-                    <p style={{ margin: "8px 0 0 0", color: "#422d00", fontWeight: 600, fontSize: "0.95rem" }}>{member.role}</p>
-                  </div>
-                </div>
-              ))}
+              {bottomMembers.map((member) => renderFlippableCard(member, "100%"))}
             </div>
             <div />
           </div>

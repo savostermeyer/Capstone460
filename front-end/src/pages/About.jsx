@@ -10,6 +10,7 @@ const teamMembers = [
 
 export default function About() {
   const [images, setImages] = useState({});
+  const [flippedCards, setFlippedCards] = useState({});
 
   const handleImageUpload = (memberId, event) => {
     const file = event.target.files?.[0];
@@ -23,6 +24,13 @@ export default function About() {
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const toggleCard = (memberId) => {
+    setFlippedCards((prev) => ({
+      ...prev,
+      [memberId]: !prev[memberId],
+    }));
   };
 
   return (
@@ -52,76 +60,176 @@ export default function About() {
           maxWidth: "1200px",
           margin: "0 auto"
         }}>
-          {teamMembers.map(member => (
-            <div key={member.id} style={{
-              background: "var(--gold)",
-              border: "1px solid var(--border)",
-              borderRadius: "12px",
-              padding: "20px",
-              textAlign: "center",
-              boxShadow: "var(--shadow)"
-            }}>
-              <div style={{
-                width: "150px",
-                height: "150px",
-                borderRadius: "12px",
-                background: "#1d1d1d",
-                margin: "0 auto 20px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-                position: "relative",
-                cursor: "pointer",
-                border: "2px solid #2a2a2a"
-              }}>
-                {images[member.id] ? (
-                  <>
-                    <img 
-                      src={images[member.id]} 
-                      alt={member.name} 
-                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    />
-                    <label htmlFor={`upload-${member.id}`} style={{
-                      position: "absolute",
-                      inset: 0,
-                      background: "rgba(0,0,0,0.5)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      opacity: 0,
-                      transition: "opacity 0.3s ease",
-                      cursor: "pointer",
-                      fontSize: "0.8rem",
-                      color: "#E0C98D"
-                    }} 
-                    onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
-                    onMouseLeave={(e) => e.currentTarget.style.opacity = "0"}
-                    >
-                      Change Photo
-                    </label>
-                  </>
-                ) : (
-                  <label htmlFor={`upload-${member.id}`} style={{
-                    cursor: "pointer",
-                    color: "#C9C9C9",
-                    textAlign: "center",
+          {teamMembers.map((member) => (
+            <div key={member.id} style={{ perspective: "1200px" }}>
+              <div
+                style={{
+                  position: "relative",
+                  minHeight: "360px",
+                  transformStyle: "preserve-3d",
+                  transition: "transform 0.6s ease",
+                  transform: flippedCards[member.id] ? "rotateY(180deg)" : "rotateY(0deg)",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "var(--gold)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "12px",
                     padding: "20px",
-                    fontSize: "0.85rem"
-                  }}>
-                    Click to upload photo
-                  </label>
-                )}
-                <input 
-                  id={`upload-${member.id}`}
-                  type="file" 
-                  accept="image/*"
-                  onChange={(e) => handleImageUpload(member.id, e)}
-                  style={{ display: "none" }}
-                />
+                    textAlign: "center",
+                    boxShadow: "var(--shadow)",
+                    backfaceVisibility: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        width: "150px",
+                        height: "150px",
+                        borderRadius: "12px",
+                        background: "#1d1d1d",
+                        margin: "0 auto 20px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        overflow: "hidden",
+                        position: "relative",
+                        cursor: "pointer",
+                        border: "2px solid #2a2a2a",
+                      }}
+                    >
+                      {images[member.id] ? (
+                        <>
+                          <img
+                            src={images[member.id]}
+                            alt={member.name}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                          <label
+                            htmlFor={`upload-${member.id}`}
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              background: "rgba(0,0,0,0.5)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              opacity: 0,
+                              transition: "opacity 0.3s ease",
+                              cursor: "pointer",
+                              fontSize: "0.8rem",
+                              color: "#E0C98D",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                            onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
+                          >
+                            Change Photo
+                          </label>
+                        </>
+                      ) : (
+                        <label
+                          htmlFor={`upload-${member.id}`}
+                          style={{
+                            cursor: "pointer",
+                            color: "#C9C9C9",
+                            textAlign: "center",
+                            padding: "20px",
+                            fontSize: "0.85rem",
+                          }}
+                        >
+                          Click to upload photo
+                        </label>
+                      )}
+                      <input
+                        id={`upload-${member.id}`}
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(member.id, e)}
+                        style={{ display: "none" }}
+                      />
+                    </div>
+
+                    <h3 style={{ margin: "15px 0 5px", color: "#111" }}>{member.name}</h3>
+                    <p style={{ color: "#422d00", fontWeight: "600", fontSize: "0.95rem", margin: "0 0 15px" }}>
+                      {member.role}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleCard(member.id)}
+                    aria-label={`Flip ${member.name} card`}
+                    style={{
+                      alignSelf: "center",
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "999px",
+                      border: "1px solid #2a2a2a",
+                      background: "#f7eed7",
+                      color: "#111",
+                      cursor: "pointer",
+                      fontSize: "1rem",
+                      fontWeight: "700",
+                      lineHeight: 1,
+                    }}
+                  >
+                    ↻
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "var(--gold)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "12px",
+                    padding: "20px",
+                    textAlign: "center",
+                    boxShadow: "var(--shadow)",
+                    transform: "rotateY(180deg)",
+                    backfaceVisibility: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <div>
+                    <h3 style={{ margin: "4px 0 8px", color: "#111" }}>{member.name}</h3>
+                    <p style={{ color: "#422d00", fontWeight: "700", fontSize: "0.95rem", margin: "0 0 16px" }}>
+                      Project Contribution
+                    </p>
+                    <p style={{ color: "#1f1f1f", lineHeight: 1.5, margin: 0 }}>{member.description}</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleCard(member.id)}
+                    aria-label={`Flip ${member.name} card back`}
+                    style={{
+                      alignSelf: "center",
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "999px",
+                      border: "1px solid #2a2a2a",
+                      background: "#f7eed7",
+                      color: "#111",
+                      cursor: "pointer",
+                      fontSize: "1rem",
+                      fontWeight: "700",
+                      lineHeight: 1,
+                    }}
+                  >
+                    ↻
+                  </button>
+                </div>
               </div>
-              <h3 style={{ margin: "15px 0 5px", color: "#111" }}>{member.name}</h3>
-              <p style={{ color: "#422d00", fontWeight: "600", fontSize: "0.95rem", margin: "0 0 15px" }}>{member.role}</p>
             </div>
           ))}
         </div>

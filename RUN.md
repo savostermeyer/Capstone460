@@ -49,3 +49,6 @@ Once all 3 terminals show "running":
 
 Press **Ctrl+C** in each terminal
 
+Hardcoded doctor login:
+user : doctor@skinai.com
+password : doctor123
