@@ -11,13 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY back-end/src/requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install runtime server + Python dependencies. PyTorch +cpu wheels are hosted on the PyTorch index.
+RUN pip install --no-cache-dir gunicorn && \
+    pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
-# Copy entire application
-COPY . .
+# Copy the backend source (expertSystem module must be importable at root level)
+COPY back-end/src/ .
 
 # Expose port (Cloud Run uses PORT environment variable)
 EXPOSE 8080
