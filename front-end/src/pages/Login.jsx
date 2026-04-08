@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 function getLoggedInUser() {
@@ -19,11 +19,16 @@ export default function Login() {
   const [msg, setMsg] = useState("");
   const [msgType, setMsgType] = useState(""); // "error" | "success"
   const [isSignup, setIsSignup] = useState(false);
-  const [loggedInUser] = useState(getLoggedInUser);
+  const [redirecting] = useState(() => Boolean(getLoggedInUser()));
+
+  useEffect(() => {
+    if (redirecting) {
+      navigate("/upload", { replace: true });
+    }
+  }, []);
 
   const nextPath = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    // Expect paths like "/reports" instead of "reports.html"
     return params.get("next") || "/reports";
   }, [location.search]);
 
@@ -111,34 +116,7 @@ export default function Login() {
 
   const msgColor = msgType === "error" ? "#7a0000" : msgType === "success" ? "#1a4a1a" : "#333";
 
-  if (loggedInUser) {
-    return (
-      <main className="container narrow">
-        <section className="section-pad" style={{ textAlign: "center" }}>
-          <h1 className="h-title">Already Logged In</h1>
-          <p className="muted">You are signed in as <strong>{loggedInUser}</strong>.</p>
-          <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 16 }}>
-            <button
-              className="btn btn-cta"
-              onClick={() => navigate(nextPath)}
-            >
-              Continue
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={() => {
-                localStorage.removeItem("skinai_user");
-                localStorage.removeItem("skinai_role");
-                window.location.reload();
-              }}
-            >
-              Log Out
-            </button>
-          </div>
-        </section>
-      </main>
-    );
-  }
+  if (redirecting) return null;
 
   return (
     <main className="container narrow">
