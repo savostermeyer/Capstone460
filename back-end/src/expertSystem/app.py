@@ -489,7 +489,7 @@ def static_pages(path):
     try:
         return send_from_directory(FRONT_DIR, path)
     except Exception:
-        return jsonify(error=f"{path} not found"), 404
+        return send_from_directory(FRONT_DIR, "index.html")
 
 
 

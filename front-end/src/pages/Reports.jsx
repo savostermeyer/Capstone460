@@ -50,13 +50,13 @@ const DISEASE_LABELS = {
 };
 
 const DISEASE_DESCRIPTIONS = {
-  akiec: "Precancerous, sun-related scaly lesions that can evolve over time.",
-  bcc: "Slow-growing skin cancer; often appears as a pearly or ulcerated bump.",
-  bkl: "Common, benign growths with a waxy or stuck-on appearance.",
-  df: "Benign, firm skin nodule, often on legs or arms.",
-  mel: "Potentially aggressive skin cancer; needs prompt evaluation.",
-  nv: "Common benign mole; usually stable in shape and color.",
-  vasc: "Benign blood-vessel lesion; may appear red, purple, or blue.",
+  akiec: "A skin condition caused by years of sun exposure, appearing as rough, scaly patches on areas like the face, scalp, or hands. They may be pink, red, or brown and feel like sandpaper. A small number can develop into skin cancer if left untreated.",
+  bcc: "The most common type of skin cancer, growing slowly on the outer skin layer. It often looks like a shiny or waxy bump, a flat skin-colored spot, or a sore that bleeds and scabs. It rarely spreads but should be treated to prevent damage to surrounding skin.",
+  bkl: "Non-cancerous skin growths that appear as waxy, wart-like, or stuck-on brown to black patches. They are harmless but can look concerning due to their dark appearance. They can be removed if irritated or for cosmetic reasons.",
+  df: "A harmless skin bump that feels firm and rubbery just under the surface. Usually appears on the lower legs as a small brownish to reddish bump that may dimple inward when pinched. Typically requires no treatment.",
+  mel: "The most dangerous form of skin cancer. Often looks like a mole that changes in size, shape, or color - typically uneven shaped with irregular borders and multiple shades of brown, black, red, or blue. Early detection is critical as it can spread rapidly to other parts of the body.",
+  nv: "A common mole that appears as a small, well-defined brown or tan spot on the skin. Most are stable and harmless throughout life. However, any changes in size, shape, color, or texture should be checked by a doctor.",
+  vasc: "Harmless growths caused by blood vessels close to the skin surface. They typically appear as red, purple, or blue spots or raised bumps. Most require no treatment but can be removed if they bleed easily or for cosmetic reasons.",
 };
 
 const FITZPATRICK_SCALE = {
@@ -1047,6 +1047,9 @@ export default function Reports() {
                               <p className="muted" style={{ marginTop: 6 }}>
                                 {nextStepForRisk(riskScore)}
                               </p>
+                              <p className="muted" style={{ marginTop: 4, fontStyle: "italic" }}>
+                                These descriptions are for informational purposes only and do not constitute medical advice.
+                              </p>
                             </div>
                           </div>
                         );
@@ -1091,6 +1094,9 @@ export default function Reports() {
                           {nextStepForRisk(
                             r.analysis?.risk_score || r.primary_result
                           )}
+                        </p>
+                        <p className="muted" style={{ marginTop: 4, fontStyle: "italic" }}>
+                          These descriptions are for informational purposes only and do not constitute medical advice.
                         </p>
                       </div>
 

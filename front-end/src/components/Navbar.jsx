@@ -1,6 +1,27 @@
-import { NavLink, Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { NavLink, Link, useNavigate } from "react-router-dom";
 
 export default function Navbar() {
+  const navigate = useNavigate();
+  const [userEmail, setUserEmail] = useState(() =>
+    localStorage.getItem("skinai_user") || null
+  );
+
+  useEffect(() => {
+    function onStorage() {
+      setUserEmail(localStorage.getItem("skinai_user") || null);
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  function signOut() {
+    localStorage.removeItem("skinai_user");
+    localStorage.removeItem("skinai_role");
+    setUserEmail(null);
+    navigate("/login", { replace: true });
+  }
+
   return (
     <header className="site-header" role="banner">
       <div className="container header-inner">
@@ -47,8 +68,9 @@ export default function Navbar() {
           <NavLink
             to="/login"
             className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+            onClick={userEmail ? (e) => { e.preventDefault(); signOut(); } : undefined}
           >
-            Login
+            {userEmail ? "Sign Out" : "Login"}
           </NavLink>
         </nav>
       </div>

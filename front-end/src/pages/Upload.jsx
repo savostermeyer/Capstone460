@@ -38,14 +38,32 @@ const DISEASE_LABELS = {
 };
 
 const DISEASE_DESCRIPTIONS = {
-  akiec: "Precancerous, sun-related scaly lesions that can evolve over time.",
-  bcc: "Slow-growing skin cancer; often appears as a pearly or ulcerated bump.",
-  bkl: "Common, benign growths with a waxy or stuck-on appearance.",
-  df: "Benign, firm skin nodule, often on legs or arms.",
-  mel: "Potentially aggressive skin cancer; needs prompt evaluation.",
-  nv: "Common benign mole; usually stable in shape and color.",
-  vasc: "Benign blood-vessel lesion; may appear red, purple, or blue.",
+  akiec: "A skin condition caused by years of sun exposure, appearing as rough, scaly patches on areas like the face, scalp, or hands. They may be pink, red, or brown and feel like sandpaper. A small number can develop into skin cancer if left untreated.",
+  bcc: "The most common type of skin cancer, growing slowly on the outer skin layer. It often looks like a shiny or waxy bump, a flat skin-colored spot, or a sore that bleeds and scabs. It rarely spreads but should be treated to prevent damage to surrounding skin.",
+  bkl: "Non-cancerous skin growths that appear as waxy, wart-like, or stuck-on brown to black patches. They are harmless but can look concerning due to their dark appearance. They can be removed if irritated or for cosmetic reasons.",
+  df: "A harmless skin bump that feels firm and rubbery just under the surface. Usually appears on the lower legs as a small brownish to reddish bump that may dimple inward when pinched. Typically requires no treatment.",
+  mel: "The most dangerous form of skin cancer. Often looks like a mole that changes in size, shape, or color — typically uneven shaped with irregular borders and multiple shades of brown, black, red, or blue. Early detection is critical as it can spread rapidly to other parts of the body.",
+  nv: "A common mole that appears as a small, well-defined brown or tan spot on the skin. Most are stable and harmless throughout life. However, any changes in size, shape, color, or texture should be checked by a doctor.",
+  vasc: "Harmless growths caused by blood vessels close to the skin surface. They typically appear as red, purple, or blue spots or raised bumps. Most require no treatment but can be removed if they bleed easily or for cosmetic reasons.",
 };
+
+const FITZPATRICK_COLORS = {
+  I:   "#fde8d8",
+  II:  "#f5cba7",
+  III: "#e0a882",
+  IV:  "#c68642",
+  V:   "#8d5524",
+  VI:  "#4a2912",
+};
+
+const FITZPATRICK_OPTIONS = [
+  { value: "I",   label: "I — Very fair" },
+  { value: "II",  label: "II — Fair" },
+  { value: "III", label: "III — Medium" },
+  { value: "IV",  label: "IV — Olive" },
+  { value: "V",   label: "V — Brown" },
+  { value: "VI",  label: "VI — Dark brown" },
+];
 
 function normalizeLabel(label) {
   if (!label) return "Unknown";
@@ -131,6 +149,19 @@ function getCurrentSid() {
   }
 }
 
+  const [skinTypeOpen, setSkinTypeOpen] = useState(false);
+  const skinTypeRef = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (skinTypeRef.current && !skinTypeRef.current.contains(e.target)) {
+        setSkinTypeOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
   const [otherSymptom, setOtherSymptom] = useState("");
   const [formMsg, setFormMsg] = useState("");
   const [result, setResult] = useState(null); // demo result object
@@ -139,6 +170,28 @@ function getCurrentSid() {
 
   const [aiMsg, setAiMsg] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+
+  // Partial reset on mount: keep identity fields, clear lesion-specific fields and results
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      location: "",
+      duration: "",
+      primarySymptoms: [],
+      medicalBackground: "",
+      familyHistory: "",
+      sunExposure: "",
+      spfUse: "",
+      currentMedications: "",
+      consent: false,
+    }));
+    setOtherSymptom("");
+    setFiles([]);
+    setPreviews([]);
+    setResult(null);
+    setFormMsg("");
+    setAiMsg("");
+  }, []);
 
   useEffect(() => {
     const syncUser = () => setUserEmail(getLoggedInUser());
@@ -855,20 +908,39 @@ function getCurrentSid() {
                 <label className="q-label">
                   Skin Condition <span className="req">*</span>
                 </label>
-                <select
-                  className="q-select"
-                  value={form.skinType}
-                  onChange={(e) => updateField("skinType", e.target.value)}
-                  required
-                >
-                  <option value="">Select...</option>
-                  <option value="I">I — Very fair</option>
-                  <option value="II">II — Fair</option>
-                  <option value="III">III — Medium</option>
-                  <option value="IV">IV — Olive</option>
-                  <option value="V">V — Brown</option>
-                  <option value="VI">VI — Dark brown</option>
-                </select>
+                <div ref={skinTypeRef} style={{ position: "relative" }}>
+                  <div
+                    className="q-select"
+                    style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", color: "inherit" }}
+                    onClick={() => setSkinTypeOpen((o) => !o)}
+                  >
+                    {form.skinType ? (
+                      <>
+                        <span style={{ width: 14, height: 14, borderRadius: 2, background: FITZPATRICK_COLORS[form.skinType], flexShrink: 0, border: "1px solid rgba(255,255,255,0.2)" }} />
+                        {FITZPATRICK_OPTIONS.find((o) => o.value === form.skinType)?.label}
+                      </>
+                    ) : (
+                      <span className="muted">Select...</span>
+                    )}
+                    <span style={{ marginLeft: "auto" }}>▾</span>
+                  </div>
+                  {skinTypeOpen && (
+                    <div style={{ position: "absolute", zIndex: 100, top: "100%", left: 0, right: 0, background: "#ffffff", border: "1px solid #ccc", borderRadius: 6, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
+                      {FITZPATRICK_OPTIONS.map((opt) => (
+                        <div
+                          key={opt.value}
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", color: "#1a1a1a" }}
+                          onMouseDown={() => { updateField("skinType", opt.value); setSkinTypeOpen(false); }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = "#f0f0f0"}
+                          onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                        >
+                          <span style={{ width: 14, height: 14, borderRadius: 2, background: FITZPATRICK_COLORS[opt.value], flexShrink: 0, border: "1px solid rgba(255,255,255,0.3)" }} />
+                          {opt.label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="q-card">
@@ -1088,6 +1160,9 @@ function getCurrentSid() {
                       <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
                       <p className="muted" style={{ marginTop: 6 }}>
                         {nextStepForRisk(imgResult.primary_result)}
+                      </p>
+                      <p className="muted" style={{ marginTop: 4, fontStyle: "italic" }}>
+                        These descriptions are for informational purposes only and do not constitute medical advice.
                       </p>
                     </div>
                   </div>
