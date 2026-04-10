@@ -9,6 +9,7 @@ require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+let dbReady = false;
 
 if (process.env.NODE_DNS_SERVERS) {
   const dnsServers = process.env.NODE_DNS_SERVERS.split(",")
@@ -47,11 +48,25 @@ async function connectDB() {
   try {
     await client.connect();
     db = client.db("skin-images");
+    dbReady = true;
     console.log("Connected to MongoDB");
+    return true;
   } catch (error) {
+    dbReady = false;
     console.error("MongoDB connection error:", error);
-    process.exit(1);
+    return false;
   }
+}
+
+function ensureDbReady(res) {
+  if (dbReady && db) {
+    return true;
+  }
+
+  res.status(503).json({
+    error: "Database is currently unavailable",
+  });
+  return false;
 }
 
 // Get auth database helper
@@ -81,6 +96,14 @@ const upload = multer({
 // Routes
 // Health check endpoint to verify DB connection
 app.get("/api/health", async (req, res) => {
+  if (!dbReady) {
+    return res.status(503).json({
+      status: "unhealthy",
+      message: "Database connection failed",
+      database: "skin-images",
+    });
+  }
+
   try {
     await client.db().admin().ping();
     res.json({
@@ -99,6 +122,10 @@ app.get("/api/health", async (req, res) => {
 
 app.post("/api/upload", upload.single("image"), async (req, res) => {
   try {
+    if (!ensureDbReady(res)) {
+      return;
+    }
+
     if (!req.file) {
       return res.status(400).json({ error: "No image file provided" });
     }
@@ -126,6 +153,10 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
 
 app.get("/api/images/:id", async (req, res) => {
   try {
+    if (!ensureDbReady(res)) {
+      return;
+    }
+
     const { ObjectId } = require("mongodb");
     const image = await db.collection("images").findOne({
       _id: new ObjectId(req.params.id),
@@ -153,6 +184,10 @@ function isValidEmail(email) {
 // Register endpoint
 app.post("/api/auth/register", async (req, res) => {
   try {
+    if (!ensureDbReady(res)) {
+      return;
+    }
+
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -208,6 +243,10 @@ app.post("/api/auth/register", async (req, res) => {
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
   try {
+    if (!ensureDbReady(res)) {
+      return;
+    }
+
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -282,11 +321,10 @@ Provide a helpful, concise response:`;
   }
 });
 
-// Start server
-connectDB().then(() => {
-  app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
-  });
+// Start server even if MongoDB is temporarily unavailable.
+app.listen(port, async () => {
+  console.log(`Server running on http://localhost:${port}`);
+  await connectDB();
 });
 
 // Graceful shutdown

@@ -1,15 +1,21 @@
 # Google Cloud Deployment Guide
 
+Your app has **two backend services**, each deployed as a separate Cloud Run service:
+
+| Service | Dockerfile | Purpose |
+| --- | --- | --- |
+| `skinai-python` | `Dockerfile` | Python Flask – AI analysis & chatbot |
+| `skinai-node` | `Dockerfile.node` | Node.js – auth, MongoDB, image uploads + serves frontend |
+
+---
+
 ## Prerequisites
 
-1. **Google Cloud Project**
-   - Create a project: https://console.cloud.google.com
-   - Note your `PROJECT_ID`
+1. **Google Cloud Project** — create one at https://console.cloud.google.com and note your `PROJECT_ID`
 
 2. **Google Cloud CLI**
    ```bash
    # Install from: https://cloud.google.com/sdk/docs/install
-   # Verify installation
    gcloud --version
    ```
 
@@ -23,249 +29,194 @@
    ```bash
    gcloud services enable run.googleapis.com
    gcloud services enable artifactregistry.googleapis.com
-   gcloud services enable secretmanager.googleapis.com
+   gcloud services enable cloudbuild.googleapis.com
    ```
 
 ---
 
-## Option 1: Deploy to Cloud Run (Recommended)
+## Step 1 — Deploy the Python service first
 
-### Step 1: Store Gemini API Key as Secret
+The Python service must be deployed first so its URL can be embedded into the frontend bundle.
+
 ```bash
-# Create secret
-echo "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key --data-file=-
+# From the repo root
+# Build Python image using root Dockerfile
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/skinai-python:latest .
 
-# Grant Cloud Run access to secret
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member=serviceAccount:YOUR_PROJECT_ID@appspot.gserviceaccount.com \
-  --role=roles/secretmanager.secretAccessor
+# Deploy Python image to Cloud Run
+gcloud run deploy skinai-python \
+  --image gcr.io/YOUR_PROJECT_ID/skinai-python:latest \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 2Gi \
+  --timeout 600 \
+  --set-env-vars "GEMINI_API_KEY=YOUR_GEMINI_API_KEY" \
+  --max-instances 5
 ```
 
-### Step 2: Deploy from Source
-```bash
-cd C:\Capstone
+After it finishes, get the service URL:
 
-gcloud run deploy capstone \
-  --source . \
+```bash
+gcloud run services describe skinai-python \
+  --region us-central1 \
+  --format "value(status.url)"
+```
+
+You'll get something like `https://skinai-python-xxxx-uc.a.run.app`. **Copy this URL — you need it in Step 2.**
+
+---
+
+## Step 2 — Deploy the Node.js + frontend service
+
+The React frontend is built inside the Docker image, so `VITE_API_BASE_URL` must point to the Python URL from Step 1 **at build time**.
+
+```bash
+# From the repo root — replace the Python URL below
+# Build Node image with Dockerfile.node through Cloud Build
+gcloud builds submit \
+  --config cloudbuild.node.yaml \
+  --substitutions _IMAGE=gcr.io/YOUR_PROJECT_ID/skinai-node:latest,_PYTHON_URL=https://skinai-python-xxxx-uc.a.run.app
+
+# Deploy Node image to Cloud Run
+gcloud run deploy skinai-node \
+  --image gcr.io/YOUR_PROJECT_ID/skinai-node:latest \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
   --memory 1Gi \
-  --timeout 600 \
-  --set-env-vars "GEMINI_API_KEY=YOUR_GEMINI_API_KEY" \
+  --timeout 120 \
+  --set-env-vars "MONGODB_URI=YOUR_MONGODB_URI,GEMINI_API_KEY=YOUR_GEMINI_API_KEY" \
   --max-instances 10
 ```
 
-### Step 3: Verify Deployment
-```bash
-# Get the service URL
-gcloud run services describe capstone --region us-central1
-
-# Test the service
-curl https://capstone-XXXXX.run.app/
-```
+After deploy, the `skinai-node` URL is the address your users open in the browser.
 
 ---
 
-## Option 2: Deploy with Container Registry (CI/CD)
+## CORS — required after deploying Python
 
-### Step 1: Build and Push Image
+The browser calls the Python service directly (upload analysis, chatbot). Make sure the Python Flask app allows the Node service URL as an origin. In `back-end/src/expertSystem/app.py`, verify the CORS config includes the Node service URL or set it via an env var.
+
+---
+
+## Environment Variables Reference
+
+| Variable | Service | Description |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Python + Node | Google Gemini API key |
+| `MONGODB_URI` | Node | MongoDB Atlas connection string |
+| `GEMINI_MODEL` | Node (optional) | Defaults to `gemini-2.0-flash` |
+| `VITE_API_BASE_URL` | Node (build arg) | Python service URL, baked into frontend at build time |
+
+---
+
+## Updating deployments
+
+**Python only** (AI/chatbot changes):
 ```bash
-# Configure Docker
-gcloud auth configure-docker gcr.io
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/skinai-python:latest .
 
-# Build image
-docker build -t gcr.io/YOUR_PROJECT_ID/capstone:latest .
-
-# Push to Container Registry
-docker push gcr.io/YOUR_PROJECT_ID/capstone:latest
-```
-
-### Step 2: Deploy from Image
-```bash
-gcloud run deploy capstone \
-  --image gcr.io/YOUR_PROJECT_ID/capstone:latest \
-  --platform managed \
+gcloud run deploy skinai-python \
+  --image gcr.io/YOUR_PROJECT_ID/skinai-python:latest \
   --region us-central1 \
-  --allow-unauthenticated \
-  --memory 1Gi \
-  --timeout 600 \
-  --set-env-vars "GEMINI_API_KEY=YOUR_GEMINI_API_KEY" \
-  --max-instances 10
+  --set-env-vars "GEMINI_API_KEY=YOUR_GEMINI_API_KEY"
 ```
 
----
-
-## Option 3: Deploy with GitHub Actions (Automated)
-
-### Step 1: Create Service Account
+**Node + frontend** (UI or server changes):
 ```bash
-# Create service account
-gcloud iam service-accounts create capstone-deploy \
-  --display-name="Capstone Deployment"
+gcloud builds submit \
+  --config cloudbuild.node.yaml \
+  --substitutions _IMAGE=gcr.io/YOUR_PROJECT_ID/skinai-node:latest,_PYTHON_URL=https://skinai-python-xxxx-uc.a.run.app
 
-# Grant permissions
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member=serviceAccount:capstone-deploy@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-  --role=roles/run.admin
-
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member=serviceAccount:capstone-deploy@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-  --role=roles/storage.admin
-
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member=serviceAccount:capstone-deploy@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-  --role=roles/artifactregistry.admin
-```
-
-### Step 2: Create and Download Service Account Key
-```bash
-gcloud iam service-accounts keys create capstone-key.json \
-  --iam-account=capstone-deploy@YOUR_PROJECT_ID.iam.gserviceaccount.com
-```
-
-### Step 3: Add to GitHub Secrets
-1. Go to your GitHub repo → Settings → Secrets and variables → Actions
-2. Add these secrets:
-   - `GCP_PROJECT_ID`: YOUR_PROJECT_ID
-   - `GCP_SA_KEY`: (paste contents of capstone-key.json)
-   - `GEMINI_API_KEY`: YOUR_GEMINI_API_KEY
-
-### Step 4: Create `.github/workflows/deploy.yml`
-```yaml
-name: Deploy to Cloud Run
-
-on:
-  push:
-    branches: [ main, dBranch ]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
-
-      - name: Build and Push Docker image
-        run: |
-          gcloud builds submit \
-            --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/capstone:latest
-
-      - name: Deploy to Cloud Run
-        run: |
-          gcloud run deploy capstone \
-            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/capstone:latest \
-            --platform managed \
-            --region us-central1 \
-            --allow-unauthenticated \
-            --memory 1Gi \
-            --timeout 600 \
-            --set-env-vars "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
-            --max-instances 10
-```
-
----
-
-## Configuration Options
-
-### Environment Variables
-- `GEMINI_API_KEY` (required) - Your Google Gemini API key
-- `GEMINI_MODEL` (optional) - Model name (default: `gemini-2.0-flash`)
-- `PORT` (set by Cloud Run) - Server port (default: 8080)
-
-### Resource Settings
-- **Memory**: 1Gi (recommended for your app)
-- **CPU**: Shared (sufficient for Flask app)
-- **Timeout**: 600 seconds (for long-running chat requests)
-- **Max instances**: 10 (auto-scales based on traffic)
-
-### Scaling
-Cloud Run automatically scales based on traffic. To adjust:
-```bash
-gcloud run deploy capstone \
-  --min-instances 1 \
-  --max-instances 20 \
-  --region us-central1
+gcloud run deploy skinai-node \
+  --image gcr.io/YOUR_PROJECT_ID/skinai-node:latest \
+  --region us-central1 \
+  --set-env-vars "MONGODB_URI=YOUR_MONGODB_URI,GEMINI_API_KEY=YOUR_GEMINI_API_KEY"
 ```
 
 ---
 
 ## Monitoring and Logs
 
-### View Logs
 ```bash
-# Real-time logs
-gcloud run logs read capstone --region us-central1 --follow
+# Python service logs
+gcloud run services logs read skinai-python --region us-central1 --tail 50
 
-# Filter by date/time
-gcloud run logs read capstone \
-  --region us-central1 \
-  --limit 100
+# Node service logs
+gcloud run services logs read skinai-node --region us-central1 --tail 50
 ```
 
-### Monitor Performance
-- Visit: https://console.cloud.google.com/run
-- Check: Memory usage, request count, response times, error rates
+Dashboard: https://console.cloud.google.com/run
 
 ---
 
-## Troubleshooting
+## GitHub Actions (optional, automated CI/CD)
 
-### Build Fails
-```bash
-# Check Docker file
-docker build -t capstone:test .
+Add GitHub Secrets: `GCP_PROJECT_ID`, `GCP_SA_KEY` (service account JSON), `GEMINI_API_KEY`, `MONGODB_URI`.
 
-# Test locally first
-docker run -p 8080:8080 -e GEMINI_API_KEY=test capstone:test
+Create `.github/workflows/deploy.yml`:
+
+```yaml
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: |
+          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/skinai-python:latest .
+
+          gcloud run deploy skinai-python \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/skinai-python:latest \
+            --platform managed --region us-central1 \
+            --allow-unauthenticated --memory 2Gi --timeout 600 \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --set-env-vars "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
+
+  deploy-node:
+    runs-on: ubuntu-latest
+    needs: deploy-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: |
+          PYTHON_URL=$(gcloud run services describe skinai-python \
+            --region us-central1 \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --format "value(status.url)")
+
+          gcloud builds submit \
+            --config cloudbuild.node.yaml \
+            --substitutions _IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/skinai-node:latest,_PYTHON_URL=${PYTHON_URL}
+
+          gcloud run deploy skinai-node \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/skinai-node:latest \
+            --platform managed --region us-central1 \
+            --allow-unauthenticated --memory 1Gi \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --set-env-vars "MONGODB_URI=${{ secrets.MONGODB_URI }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
 ```
-
-### API Key Issues
-```bash
-# Verify secret is accessible
-gcloud secrets describe gemini-api-key
-gcloud secrets versions access latest --secret="gemini-api-key"
-```
-
-### Cold Start Issues
-- Cloud Run instances shut down after 15 minutes of inactivity
-- First request after shutdown takes ~5-10 seconds
-- Use Cloud Tasks to keep warm if needed
 
 ---
 
 ## Costs
 
-- **Free tier**: 2 million requests/month, 360k GB-seconds
+- **Free tier**: 2 million requests/month, 360k GB-seconds/month
 - **Beyond free**: ~$0.40 per million requests + compute time
-- **Estimate**: ~$5-10/month for typical usage
-
----
-
-## Security Best Practices
-
-1. ✅ Use Secret Manager for API keys
-2. ✅ Enable authentication for sensitive endpoints if needed
-3. ✅ Set `--no-allow-unauthenticated` for production APIs
-4. ✅ Use VPC for database connections
-5. ✅ Enable Cloud Audit Logs
-6. ✅ Use service accounts instead of user credentials
-
----
-
-## Next Steps
-
-1. Deploy to Cloud Run using Option 1 (easiest)
-2. Test endpoints: `https://capstone-XXXXX.run.app/`
-3. Monitor logs and performance
-4. Set up GitHub Actions for automatic deployments
-5. Configure custom domain (optional)
+- **Typical estimate**: ~$5–15/month for two services
 
 ---
 
@@ -273,5 +224,4 @@ gcloud secrets versions access latest --secret="gemini-api-key"
 
 - [Cloud Run Documentation](https://cloud.google.com/run/docs)
 - [Cloud Run Pricing](https://cloud.google.com/run/pricing)
-- [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
-- [Python on Google Cloud](https://cloud.google.com/python/docs)
+- [Dockerfile reference](https://docs.docker.com/reference/dockerfile/)

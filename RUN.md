@@ -52,3 +52,7 @@ Press **Ctrl+C** in each terminal
 Hardcoded doctor login:
 user : doctor@skinai.com
 password : doctor123
+
+## Deplyoed Website
+
+https://skinai-node-877350604703.us-central1.run.app/

@@ -1,0 +1,14 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.node
+      - -t
+      - ${_IMAGE}
+      - --build-arg
+      - VITE_API_BASE_URL=${_PYTHON_URL}
+      - .
+
+images:
+  - ${_IMAGE}
