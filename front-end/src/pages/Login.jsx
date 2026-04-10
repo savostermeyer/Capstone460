@@ -1,5 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+
+function getLoggedInUser() {
+  try { return localStorage.getItem("skinai_user") || ""; } catch { return ""; }
+}
 
 const DOCTOR_LOGIN = {
   email: "doctor@skinai.com",
@@ -13,11 +17,18 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState("");
+  const [msgType, setMsgType] = useState(""); // "error" | "success"
   const [isSignup, setIsSignup] = useState(false);
+  const [redirecting] = useState(() => Boolean(getLoggedInUser()));
+
+  useEffect(() => {
+    if (redirecting) {
+      navigate("/upload", { replace: true });
+    }
+  }, []);
 
   const nextPath = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    // Expect paths like "/reports" instead of "reports.html"
     return params.get("next") || "/reports";
   }, [location.search]);
 
@@ -28,15 +39,18 @@ export default function Login() {
 
     if (!email.trim() || !password.trim()) {
       setMsg("Please enter your email and password.");
+      setMsgType("error");
       return;
     }
 
     if (isSignup && password.length < 6) {
       setMsg("Password must be at least 6 characters.");
+      setMsgType("error");
       return;
     }
 
     setMsg(isSignup ? "Creating account..." : "Signing in…");
+    setMsgType("info");
 
     if (
       !isSignup &&
@@ -51,8 +65,9 @@ export default function Login() {
       }
 
       setMsg("Doctor access granted. Redirecting...");
+      setMsgType("success");
       setTimeout(() => {
-        navigate("/reports");
+        navigate(nextPath);
       }, 500);
       return;
     }
@@ -74,6 +89,7 @@ export default function Login() {
 
       if (!response.ok) {
         setMsg(data.error || "An error occurred");
+        setMsgType("error");
         return;
       }
 
@@ -86,6 +102,7 @@ export default function Login() {
       }
 
       setMsg(isSignup ? "Account created! Redirecting..." : "Success! Redirecting...");
+      setMsgType("success");
 
       setTimeout(() => {
         navigate(nextPath);
@@ -93,8 +110,13 @@ export default function Login() {
     } catch (error) {
       console.error("Auth error:", error);
       setMsg("Failed to connect to server. Please try again.");
+      setMsgType("error");
     }
   }
+
+  const msgColor = msgType === "error" ? "#7a0000" : msgType === "success" ? "#1a4a1a" : "#333";
+
+  if (redirecting) return null;
 
   return (
     <main className="container narrow">
@@ -160,7 +182,7 @@ export default function Login() {
                 {isSignup ? "Create Account" : "Sign In"}
               </button>
 
-              <p id="login-msg" className="muted" aria-live="polite" style={{ marginTop: 0 }}>
+              <p id="login-msg" aria-live="polite" style={{ marginTop: 0, color: msgColor, fontWeight: 600, fontSize: "0.95rem", minHeight: "1.4em" }}>
                 {msg}
               </p>
 
@@ -203,11 +225,6 @@ export default function Login() {
                 </button>
               </div>
 
-              {!isSignup && (
-                <p className="muted" style={{ margin: "6px 0 0", fontSize: "0.8rem" }}>
-                  Doctor demo login: {DOCTOR_LOGIN.email}
-                </p>
-              )}
             </div>
           </form>
         </div>

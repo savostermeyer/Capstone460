@@ -380,6 +380,26 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
     setImageFile(file);
   }
 
+  function openImagePicker() {
+    if (busy) return;
+    const inputEl = fileInputRef.current;
+    if (!inputEl) return;
+
+    // Reset first so selecting the same file twice still fires onChange.
+    inputEl.value = "";
+
+    try {
+      if (typeof inputEl.showPicker === "function") {
+        inputEl.showPicker();
+        return;
+      }
+    } catch {
+      // Fall back to click below.
+    }
+
+    inputEl.click();
+  }
+
   return (
     <div id="chatbot-widget">
       <button
@@ -423,7 +443,7 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
             <button
               id="chatbot-attach"
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={openImagePicker}
               disabled={busy}
               aria-label="Attach image"
               title="Attach image"
