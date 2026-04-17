@@ -8,7 +8,8 @@ const bcrypt = require("bcrypt");
 require("dotenv").config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = parseInt(process.env.PORT, 10) || 8080;
+const staticDistPath = path.join(__dirname, "front-end", "dist");
 let dbReady = false;
 
 if (process.env.NODE_DNS_SERVERS) {
@@ -36,7 +37,7 @@ const model = genAI.getGenerativeModel({
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static("front-end/dist"));
+app.use(express.static(staticDistPath));
 
 // MongoDB connection
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -319,6 +320,14 @@ Provide a helpful, concise response:`;
       reply: "I'm having trouble connecting right now. Please try again later.",
     });
   }
+});
+
+// Serve the Vite-built frontend and fallback to index.html for non-API client routes.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api") || req.path.startsWith("/chat")) {
+    return next();
+  }
+  res.sendFile(path.resolve(__dirname, "front-end", "dist", "index.html"));
 });
 
 // Start server even if MongoDB is temporarily unavailable.
