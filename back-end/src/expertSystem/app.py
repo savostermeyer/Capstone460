@@ -26,9 +26,7 @@
 import os
 import sys
 from pathlib import Path
-from keras_predictor import KerasResNetPredictor
 from dotenv import load_dotenv
-from expertSystem.disease_prediction import build_expert_fusion_output
 # --- Static path to .env in project root ---
 # Resolves from: expertSystem/app.py -> back-end/src/ -> back-end/ -> Capstone/
 APP_DIR = Path(__file__).resolve().parent
@@ -78,8 +76,6 @@ if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
 
 # Import after sys.path is prepared
-from query import search  # noqa: E402
-from expert_pipeline import run_expert_pipeline  # noqa: E402
 
 FRONT_DIR = os.path.join(ROOT, "front-end")
 DATA_DIR = os.path.join(ROOT, "data")
@@ -147,6 +143,8 @@ def ham(image_id: str):
 
 @app.post("/query")
 def do_query():
+    from query import search  # noqa: E402
+
     if "image" not in request.files:
         return jsonify(error="image file required (field name: 'image')"), 400
     f = request.files["image"]
@@ -191,6 +189,10 @@ def _analysis_to_chat_message(pipeline_result: dict) -> str:
 
 @app.post("/analyze_skin")
 def analyze_skin():
+    from keras_predictor import KerasResNetPredictor
+    from expert_pipeline import run_expert_pipeline  # noqa: E402
+    from expertSystem.disease_prediction import build_expert_fusion_output
+
     """
     Endpoint: POST /analyze_skin
     Required fields:
