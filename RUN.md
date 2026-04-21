@@ -59,6 +59,10 @@ password : doctor123
 cd back-end 
 python -m pytest tests/ -v
 
+## To Download Back-End dependecies
+pip install -r back-end/src/requirements.txt
+
+
 ## Deplyoed Website
 
 https://skinai-node-877350604703.us-central1.run.app/
