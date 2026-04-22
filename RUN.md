@@ -56,8 +56,17 @@ password : doctor123
 
 
 ## To Run Test Cases
-cd back-end 
+```bash
+cd back-end
 python -m pytest tests/ -v
+```
+
+## To Generate Research Paper Tables (CF + Predictions for all 14 images)
+```bash
+cd back-end
+python generate_test_results.py
+```
+Loads the real Keras model (~30 sec), runs all 14 test images, prints Expert System and CNN tables, and saves `back-end/test_results.csv`.
 
 ## To Download Back-End dependecies
 pip install -r back-end/src/requirements.txt

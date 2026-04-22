@@ -110,6 +110,18 @@ if MONGO_URI:
         print("[mongo] could not connect:", e)
 
 
+def _cf_term(cf: float) -> str:
+    if   cf >= 0.8:   return "Definitely"
+    elif cf >= 0.6:   return "Almost certainly"
+    elif cf >= 0.4:   return "Probably"
+    elif cf >= 0.2:   return "Maybe"
+    elif cf >= -0.19: return "Unknown / Uncertain"
+    elif cf >= -0.39: return "Probably not"
+    elif cf >= -0.59: return "Maybe not"
+    elif cf >= -0.79: return "Almost certainly not"
+    else:             return "Definitely not"
+
+
 def _strip_exif(img: Image.Image) -> Image.Image:
     try:
         img = ImageOps.exif_transpose(img)
@@ -299,10 +311,22 @@ def analyze_skin():
         # Determine risk score
         risk_score = reasoning["primary_result"]
 
+        # Derive winning CF and certainty term
+        facts = reasoning.get("facts", {}) or {}
+        _winning_cf = {
+            "high_risk":        facts.get("high_risk_flag", 0.0),
+            "moderate_risk":    facts.get("moderate_risk_flag", 0.0),
+            "low_risk":         facts.get("low_risk_flag", 0.0),
+            "clinician_review": facts.get("needs_clinician_review", 0.0),
+        }
+        cf_value = round(float(_winning_cf.get(risk_score, 0.0) or 0.0), 2)
+
         # Build response
         response = {
             "top_predictions": top_predictions,
             "risk_score": risk_score,
+            "cf": cf_value,
+            "cf_term": _cf_term(cf_value),
             "explanation_summary": explanation_seed,
             # include the assistant-friendly explanation text that was seeded into the session
             "assistant_seed": chat_message,
