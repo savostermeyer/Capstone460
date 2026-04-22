@@ -53,6 +53,17 @@ Hardcoded doctor login:
 user : doctor@skinai.com
 password : doctor123
 
+
+
+## To Run Test Cases
+cd back-end 
+python -m pytest tests/ -v
+
+## To Download Back-End dependecies
+pip install -r back-end/src/requirements.txt
+
+
 ## Deplyoed Website
 
 https://skinai-node-877350604703.us-central1.run.app/
+

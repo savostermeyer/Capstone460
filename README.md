@@ -29,6 +29,15 @@ This project was developed as part of a Senior Capstone at Purdue University For
 
 ---
 
+## Disease Trained On
+akiec   - Actinic keratosis
+bcc     - Basal cell carcinoma
+bkl     - Benign keratosis
+df      - Dermatofibroma
+mel     - Melanoma
+nv      - Melanocytic nevi
+vasc    - Vascular lesions
+
 ## Running the Project
 
 See **`RUN.md`** for step-by-step instructions on running the project locally.
