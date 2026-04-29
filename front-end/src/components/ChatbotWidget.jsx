@@ -330,7 +330,11 @@ export default function ChatbotWidget({ title = "Talk to AI Agent" }) {
           data.assistant ||
           "[No reply]";
 
-        addMessage(String(reply), "bot");
+        let replyText = String(reply);
+        if (data.bubble_type === "report" && data.certainty_factor != null) {
+          replyText += `\n\nExpert System CF Score: ${Number(data.certainty_factor).toFixed(2)}`;
+        }
+        addMessage(replyText, "bot");
         // Success, exit retry loop
         attempt = maxRetries;
       } catch (err) {

@@ -360,11 +360,11 @@ function getCurrentSid() {
         // include page so backend/chat won't KeyError
         formData.append("page", "upload");
 
-        // required by Flask
-        formData.append("rapid_change", "false");
-        formData.append("bleeding", "false");
-        formData.append("itching", "false");
-        formData.append("pain", "false");
+        // symptom flags derived from the intake form (drive CF score)
+        formData.append("rapid_change", String(form.primarySymptoms.includes("Rapid change")));
+        formData.append("bleeding", String(form.primarySymptoms.includes("Bleeding")));
+        formData.append("itching", String(form.primarySymptoms.includes("Itching")));
+        formData.append("pain", String(form.primarySymptoms.includes("Pain")));
 
         // intake fields
         formData.append("name", form.name);
@@ -1156,15 +1156,6 @@ function getCurrentSid() {
                           })}
                       </div>
                     </div>
-
-                    {imgResult.cf_score != null && (
-                      <div style={{ marginTop: 10 }}>
-                        <strong style={{ color: "#4a9ff5" }}>Expert System CF Score</strong>
-                        <p className="muted" style={{ marginTop: 4 }}>
-                          {Number(imgResult.cf_score).toFixed(2)}
-                        </p>
-                      </div>
-                    )}
 
                     <div className="report-next-step">
                       <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>
