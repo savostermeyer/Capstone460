@@ -299,10 +299,21 @@ def analyze_skin():
         # Determine risk score
         risk_score = reasoning["primary_result"]
 
+        # Derive CF score from the winning risk flag
+        _facts = reasoning.get("facts", {})
+        _cf_map = {
+            "high_risk": "high_risk_flag",
+            "moderate_risk": "moderate_risk_flag",
+            "low_risk": "low_risk_flag",
+            "clinician_review": "needs_clinician_review",
+        }
+        certainty_factor = round(float(_facts.get(_cf_map.get(risk_score, ""), 0.0) or 0.0), 4)
+
         # Build response
         response = {
             "top_predictions": top_predictions,
             "risk_score": risk_score,
+            "certainty_factor": certainty_factor,
             "explanation_summary": explanation_seed,
             # include the assistant-friendly explanation text that was seeded into the session
             "assistant_seed": chat_message,
@@ -589,6 +600,44 @@ def chat():
 
         _SESS[sid] = st
         print(f"[CHAT] History size after: {len(st.history)} messages")
+
+        # When the chatbot has enough information and produces a report bubble,
+        # compute the full CF score from all collected session slots.
+        if out.get("bubble_type") == "report":
+            try:
+                from skinai_analyzer import analyze_skin_lesion  # noqa: E402
+
+                slots = st.slots or {}
+                clf_probs = slots.get("classifier_probs") or {}
+                topk = sorted(
+                    [{"label": k, "prob": float(v)} for k, v in clf_probs.items() if v],
+                    key=lambda x: x["prob"],
+                    reverse=True,
+                )[:3]
+
+                intake = {
+                    "rapid_change": bool(slots.get("rapid_change")),
+                    "bleeding": bool(slots.get("bleeding")),
+                    "itching": (float(slots.get("itching_0_10") or 0)) > 0,
+                    "pain": (float(slots.get("pain_0_10") or 0)) > 0,
+                }
+
+                if topk:
+                    reasoning = analyze_skin_lesion(topk, intake)
+                    facts = reasoning.get("facts", {})
+                    primary = reasoning.get("primary_result", "low_risk")
+                    _cf_map = {
+                        "high_risk": "high_risk_flag",
+                        "moderate_risk": "moderate_risk_flag",
+                        "low_risk": "low_risk_flag",
+                        "clinician_review": "needs_clinician_review",
+                    }
+                    out["certainty_factor"] = round(
+                        float(facts.get(_cf_map.get(primary, ""), 0.0) or 0.0), 4
+                    )
+                    out["cf_risk_level"] = primary
+            except Exception as _cf_err:
+                print(f"[CHAT] CF computation failed: {_cf_err}")
 
         # add absolute URLs for any image results
         out["metadata"] = metadata

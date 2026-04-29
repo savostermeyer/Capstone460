@@ -360,11 +360,11 @@ function getCurrentSid() {
         // include page so backend/chat won't KeyError
         formData.append("page", "upload");
 
-        // required by Flask
-        formData.append("rapid_change", "false");
-        formData.append("bleeding", "false");
-        formData.append("itching", "false");
-        formData.append("pain", "false");
+        // symptom flags derived from the intake form (drive CF score)
+        formData.append("rapid_change", String(form.primarySymptoms.includes("Rapid change")));
+        formData.append("bleeding", String(form.primarySymptoms.includes("Bleeding")));
+        formData.append("itching", String(form.primarySymptoms.includes("Itching")));
+        formData.append("pain", String(form.primarySymptoms.includes("Pain")));
 
         // intake fields
         formData.append("name", form.name);
@@ -502,6 +502,7 @@ function getCurrentSid() {
       normalized.all_results = results.map((result, idx) => ({
         imageIndex: idx,
         primary_result: result.risk_score ?? null,
+        cf_score: result.certainty_factor ?? null,
         key_indicators: {
           high_risk_flag: (result.risk_score || "").toLowerCase() === "high_risk",
           moderate_risk_flag: (result.risk_score || "").toLowerCase() === "moderate_risk",
