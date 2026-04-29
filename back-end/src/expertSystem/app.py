@@ -299,10 +299,21 @@ def analyze_skin():
         # Determine risk score
         risk_score = reasoning["primary_result"]
 
+        # Derive CF score from the winning risk flag
+        _facts = reasoning.get("facts", {})
+        _cf_map = {
+            "high_risk": "high_risk_flag",
+            "moderate_risk": "moderate_risk_flag",
+            "low_risk": "low_risk_flag",
+            "clinician_review": "needs_clinician_review",
+        }
+        certainty_factor = round(float(_facts.get(_cf_map.get(risk_score, ""), 0.0) or 0.0), 4)
+
         # Build response
         response = {
             "top_predictions": top_predictions,
             "risk_score": risk_score,
+            "certainty_factor": certainty_factor,
             "explanation_summary": explanation_seed,
             # include the assistant-friendly explanation text that was seeded into the session
             "assistant_seed": chat_message,

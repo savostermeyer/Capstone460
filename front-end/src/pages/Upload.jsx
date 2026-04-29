@@ -502,6 +502,7 @@ function getCurrentSid() {
       normalized.all_results = results.map((result, idx) => ({
         imageIndex: idx,
         primary_result: result.risk_score ?? null,
+        cf_score: result.certainty_factor ?? null,
         key_indicators: {
           high_risk_flag: (result.risk_score || "").toLowerCase() === "high_risk",
           moderate_risk_flag: (result.risk_score || "").toLowerCase() === "moderate_risk",
@@ -1155,6 +1156,15 @@ function getCurrentSid() {
                           })}
                       </div>
                     </div>
+
+                    {imgResult.cf_score != null && (
+                      <div style={{ marginTop: 10 }}>
+                        <strong style={{ color: "#4a9ff5" }}>Expert System CF Score</strong>
+                        <p className="muted" style={{ marginTop: 4 }}>
+                          {Number(imgResult.cf_score).toFixed(2)}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="report-next-step">
                       <strong style={{ color: "#4a9ff5" }}>Suggested medical next step</strong>

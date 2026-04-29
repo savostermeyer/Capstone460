@@ -459,6 +459,8 @@ export default function Reports() {
       const riskScore = report.analysis?.risk_score || report.primary_result || "N/A";
       y += 8;
       addBlock(`Risk Level: ${riskScore}`);
+      const primaryCF = report.analysis?.certainty_factor;
+      if (primaryCF != null) addBlock(`CF Score: ${Number(primaryCF).toFixed(2)}`);
       addBlock(`Suggested Next Step: ${nextStepForRisk(riskScore)}`);
       if (report.doctor_note) {
         y += 8;
@@ -475,6 +477,9 @@ export default function Reports() {
           addBlock(`Image ${idx + 1}:`, 11, 6);
           const imgRisk = analysis.risk_score || "N/A";
           addBlock(`  Risk Level: ${imgRisk}`, 10, 5);
+          if (analysis.certainty_factor != null) {
+            addBlock(`  CF Score: ${Number(analysis.certainty_factor).toFixed(2)}`, 10, 5);
+          }
           addBlock(`  Next Step: ${nextStepForRisk(imgRisk)}`, 10, 5);
 
           const topPreds = (analysis.top_predictions || [])
@@ -1040,6 +1045,15 @@ export default function Reports() {
                               </div>
                             </div>
 
+                            {analysis.certainty_factor != null && (
+                              <div style={{ marginTop: 10 }}>
+                                <strong style={{ color: "#4a9ff5" }}>Expert System CF Score</strong>
+                                <p className="muted" style={{ marginTop: 4 }}>
+                                  {Number(analysis.certainty_factor).toFixed(2)}
+                                </p>
+                              </div>
+                            )}
+
                             <div className="report-next-step">
                               <strong style={{ color: "#4a9ff5" }}>
                                 Suggested medical next step
@@ -1085,6 +1099,15 @@ export default function Reports() {
                             ))}
                         </div>
                       </div>
+
+                      {r.analysis?.certainty_factor != null && (
+                        <div style={{ marginTop: 10 }}>
+                          <strong style={{ color: "#4a9ff5" }}>Expert System CF Score</strong>
+                          <p className="muted" style={{ marginTop: 4 }}>
+                            {Number(r.analysis.certainty_factor).toFixed(2)}
+                          </p>
+                        </div>
+                      )}
 
                       <div className="report-next-step">
                         <strong style={{ color: "#4a9ff5" }}>
