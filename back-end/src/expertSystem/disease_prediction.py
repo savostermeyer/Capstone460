@@ -284,6 +284,10 @@ def _suspicion_strength(symptoms: Dict[str, Any]) -> float:
         elif width_mm >= 6:
             score += 0.08
 
+    asymmetry_score = _to_float(symptoms.get("asymmetry"))
+    if asymmetry_score is not None and asymmetry_score >= 0.5:
+        score += 0.20
+
     return _clamp(score, 0.0, 1.0)
 
 
@@ -312,6 +316,8 @@ def expert_rule_logits(symptoms: Dict[str, Any]) -> Tuple[Dict[str, float], Dict
     ulceration = _to_bool(symptoms.get("ulceration"))
     age = _to_float(symptoms.get("patient_age", symptoms.get("age")))
     body_site = _extract_body_site(symptoms)
+    # 0=symmetric, 1=asymmetric (ABCDE criterion A)
+    asymmetry_score = _to_float(symptoms.get("asymmetry"))
 
     # Bleeding
     if bleeding is True:
@@ -325,7 +331,7 @@ def expert_rule_logits(symptoms: Dict[str, Any]) -> Tuple[Dict[str, float], Dict
 
     # Evolution / change
     if rapid_change is True:
-        _add(logits, "mel", 0.95, "Rapid or notable change", reasons)
+        _add(logits, "mel", 1.30, "Rapid or notable change", reasons)
         _add(logits, "akiec", 0.45, "Rapid or notable change", reasons)
         _add(logits, "bcc", 0.35, "Rapid or notable change", reasons)
         _add(logits, "nv", -0.35, "Rapid change less typical", reasons)
@@ -353,7 +359,7 @@ def expert_rule_logits(symptoms: Dict[str, Any]) -> Tuple[Dict[str, float], Dict
     if border_0_10 is not None:
         b = _clamp(border_0_10, 0.0, 10.0)
         if b >= 7:
-            _add(logits, "mel", 0.95, "Irregular border", reasons)
+            _add(logits, "mel", 1.40, "Irregular border", reasons)
             _add(logits, "bcc", 0.35, "Irregular border", reasons)
         elif b >= 4:
             _add(logits, "mel", 0.35, "Some border irregularity", reasons)
@@ -454,6 +460,26 @@ def expert_rule_logits(symptoms: Dict[str, Any]) -> Tuple[Dict[str, float], Dict
             _add(logits, "bkl", 0.15, "Common trunk location", reasons)
             _add(logits, "vasc", 0.18, "Common trunk location", reasons)
             _add(logits, "mel", 0.12, "Possible trunk location", reasons)
+
+    # Asymmetry (ABCDE criterion A)
+    if asymmetry_score is not None:
+        if asymmetry_score >= 0.5:
+            _add(logits, "mel", 1.20, "Asymmetric lesion (ABCDE-A)", reasons)
+            _add(logits, "nv", -0.50, "Asymmetric (less typical for nv)", reasons)
+        elif asymmetry_score <= 0.2:
+            _add(logits, "nv", 0.45, "Symmetric lesion", reasons)
+            _add(logits, "df", 0.20, "Symmetric lesion", reasons)
+
+    # ABCDE combination bonus — multiple criteria firing together is strongly predictive of melanoma
+    abcde_active = sum([
+        asymmetry_score is not None and asymmetry_score >= 0.5,  # A
+        border_0_10 is not None and border_0_10 >= 7,             # B
+        num_colors is not None and num_colors >= 3,               # C
+        width_mm is not None and width_mm >= 6,                   # D
+        rapid_change is True,                                      # E
+    ])
+    if abcde_active >= 3:
+        _add(logits, "mel", 0.80 * (abcde_active - 2), "Multiple ABCDE criteria present", reasons)
 
     reasons = {k: v for k, v in reasons.items() if v}
     return logits, reasons
