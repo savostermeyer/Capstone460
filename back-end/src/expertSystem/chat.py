@@ -945,6 +945,21 @@ def _apply_pending_slot(state: "ConvState", user_text: Optional[str]) -> bool:
             state.pending_slot = None
             return True
 
+        # Map relative-size phrases to approximate mm (pencil eraser reference ≈ 6 mm)
+        if not re.search(r"\d", low):
+            if re.search(r"\blarger\b|\bbigger\b|\bmore\b|\bbig\b", low):
+                state.slots["diameter_mm"] = 7.0
+                state.pending_slot = None
+                return True
+            if re.search(r"\bsmaller\b|\btiny\b|\bsmall\b|\blittle\b", low):
+                state.slots["diameter_mm"] = 4.0
+                state.pending_slot = None
+                return True
+            if re.search(r"\bsame\b|\babout\s+the\s+same\b", low):
+                state.slots["diameter_mm"] = 6.0
+                state.pending_slot = None
+                return True
+
         n = _parse_positive_number_from_text(low)
         if n is not None:
             state.slots["diameter_mm"] = n
@@ -1078,7 +1093,7 @@ SYSTEM_INSTRUCTION = (
   "• bleeding = blood coming from the spot on its own or with light rubbing\n\n"
 
   "AUTO-MAPPING for tool calls (convert plain answers):\n"
-  "• asymmetry: Yes→1, No→0, Not sure→null\n"
+  "• asymmetry: ALWAYS ask 'Does one half look different from the other?' — Yes (different/uneven/not matching) →1, No (same/even/matching) →0, Not sure→null\n"
   "• border_irregularity: 0-10 scale from user should be normalized to 0..1\n"
   "• color_variegation: One→0, Two→0.5, Three+→1, Not sure→null; number_of_colors: One→1, Two→2, Three+→3\n"
   "• pain_0_10: none→0, mild→2, moderate→5, severe→8\n"
